@@ -9,9 +9,10 @@ toward the wrong answer); the predictor for a member is the stance-weighted sum 
 the outcome its shift toward the wrong answer.
 
 For each direction exp50 saved -- the general direction, its shuffled-score twins, random directions, the nine
-axes -- the Spearman correlation between predictor and outcome, with a permutation p. Beside them, the
-predictors that need no model internals: argument length (exp 3), and the net stance of what was read (exp 4).
-The monitor claim holds if the general direction predicts adoption beyond its controls and beyond those.
+axes -- the Spearman correlation between predictor and outcome, raw and PARTIAL (controlling the confounds named
+in each table), with permutation p values. The monitor claim rests on the partial correlation: it holds if the
+general direction predicts adoption beyond the shuffled and random directions and beyond the model-free
+predictors (argument length, net stance, the previous vote).
 """
 from __future__ import annotations
 
@@ -26,22 +27,38 @@ from preference_swarm.runlog import write_json
 
 
 def jury_table(rows: List[Dict], names: List[str]) -> Dict:
+    """Per direction: raw Spearman of the juror's readout over the argument with its vote shift, and the partial
+    correlation controlling the juror's before-vote (a shift measured from it regresses toward the mean), the
+    argument's length and whether it argued the wrong answer."""
     rows = [r for r in rows if r.get("readout_argument") is not None]
     y = [r["shift"] for r in rows]
-    out = {"n": len(rows), "argument_words": ST.spearman_perm([r["argument_words"] for r in rows], y)}
+    controls = [[r["before"] for r in rows], [r["argument_words"] for r in rows],
+                [1.0 if r["target"] == "wrong" else 0.0 for r in rows]]
+    out = {"n": len(rows), "controls": ["before", "argument_words", "target_wrong"],
+           "argument_words": ST.spearman_perm([r["argument_words"] for r in rows], y)}
     for j, nm in enumerate(names):
-        out[nm] = ST.spearman_perm([r["readout_argument"][j] for r in rows], y, seed=j)
+        x = [r["readout_argument"][j] for r in rows]
+        out[nm] = {**ST.spearman_perm(x, y, seed=j),
+                   **{f"partial_{k}": v for k, v in ST.partial_spearman(x, y, controls, seed=j).items()}}
     return out
 
 
 def minority_table(runs: List[Dict], names: List[str]) -> Dict:
+    """Per direction: does a member move toward the side of the statements it read more favourably?
+
+    Predictor: sum over incoming statements of stance x (readout - the mean readout of THAT reading's statements).
+    Centring within the reading removes the direction's common offset; without it the predictor is offset x net
+    stance and every direction, random ones included, inherits net stance's correlation with the shift (the
+    2026-11-07 smoke: random direction rho -0.47, net stance -0.75). Outcome: the member's shift since its previous
+    vote. Reported raw and partialled on net stance, the member's previous vote (regression to the mean) and round.
+    """
     xs: Dict[str, List[float]] = {nm: [] for nm in names}
-    net, y = [], []
+    net, prev, rnd, y = [], [], [], []
     for r in runs:
         k = r["k"]
         V = r["votes"]
         for t in range(1, len(V)):
-            senders_sign = [np.sign(V[t - 1][j]["m"]) for j in range(len(V[t - 1]))]
+            senders_sign = [float(np.sign(V[t - 1][j]["m"])) for j in range(len(V[t - 1]))]
             for i in range(k, len(V[t])):
                 inc = V[t][i].get("readout_incoming")
                 if not inc:
@@ -49,13 +66,24 @@ def minority_table(runs: List[Dict], names: List[str]) -> Dict:
                 others = [j for j in range(len(V[t])) if j != i]
                 if len(inc) != len(others):
                     continue
+                R = np.asarray(inc, dtype=np.float64)                      # (n_incoming, k)
+                if not np.all(np.isfinite(R)):
+                    continue
+                Rc = R - R.mean(axis=0, keepdims=True)
+                st = np.array([senders_sign[j] for j in others])
                 y.append(V[t][i]["m"] - V[t - 1][i]["m"])
-                net.append(float(sum(senders_sign[j] for j in others)))
+                net.append(float(st.sum()))
+                prev.append(float(V[t - 1][i]["m"]))
+                rnd.append(float(t))
                 for jn, nm in enumerate(names):
-                    xs[nm].append(float(sum(senders_sign[j] * inc[q][jn] for q, j in enumerate(others))))
-    out = {"n": len(y), "net_stance": ST.spearman_perm(net, y)}
+                    xs[nm].append(float(st @ Rc[:, jn]))
+    controls = [net, prev, rnd]
+    out = {"n": len(y), "controls": ["net_stance", "previous_vote", "round"],
+           "net_stance": ST.spearman_perm(net, y),
+           "net_stance_partial_previous_vote": ST.partial_spearman(net, y, [prev, rnd])}
     for jn, nm in enumerate(names):
-        out[nm] = ST.spearman_perm(xs[nm], y, seed=jn)
+        out[nm] = {**ST.spearman_perm(xs[nm], y, seed=jn),
+                   **{f"partial_{k}": v for k, v in ST.partial_spearman(xs[nm], y, controls, seed=jn).items()}}
     return out
 
 

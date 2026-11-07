@@ -75,6 +75,17 @@ def main(argv=None) -> int:
             traceback.print_exc()
             tel.finish()
             return 1
+        if any(x in single for x in ("e2", "e3", "e4")) and cfg.get("calibrate") is not None:
+            t0 = time.time()
+            try:     # the manipulation check first: the log shows within minutes whether the pushes move choices
+                cal = common.calibrate(ctx, cfg["calibrate"])
+                tel.record(cfg["model"], "calibrate", "ok", time.time() - t0,
+                           like={k: v["mean"] for k, v in cal.items() if k.startswith("like@")})
+            except Exception as exc:
+                failed.append("calibrate")
+                tel.record(cfg["model"], "calibrate", "failed", time.time() - t0, error=repr(exc),
+                           traceback=traceback.format_exc()[-3000:])
+                traceback.print_exc()
         for x in single:
             t0 = time.time()
             print(f"[swarm] {x} starting", flush=True)

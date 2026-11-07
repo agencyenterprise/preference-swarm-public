@@ -14,6 +14,12 @@ Message = Dict[str, str]
 VOTE_SUFFIX = "Reply with a single letter, A or B, and nothing else."
 
 
+def clean(text: str) -> str:
+    """One line, single spaces: how every statement enters a context, so a readout can find it again by its text
+    (the 2026-11-07 smoke lost half its e4 readouts to statements containing newlines)."""
+    return " ".join(str(text).split())
+
+
 def label(i: int) -> str:
     return f"Assistant {i + 1}"
 
@@ -25,7 +31,7 @@ def start(systems: Sequence[str], task: str, first_prompt: str) -> List[List[Mes
 
 
 def others_turn(i: int, statements: Sequence[str], prompt: str, n_agents: int) -> str:
-    lines = [f"{label(j)} said: \"{statements[j].strip()}\"" for j in range(n_agents) if j != i]
+    lines = [f"{label(j)} said: \"{clean(statements[j])}\"" for j in range(n_agents) if j != i]
     return "\n\n".join(lines) + f"\n\n{prompt}"
 
 
@@ -37,7 +43,7 @@ def advance(contexts: List[List[Message]], statements: Sequence[str], next_promp
     out = []
     for i, c in enumerate(contexts):
         c2 = copy.deepcopy(c)
-        c2.append({"role": "assistant", "content": statements[i].strip()})
+        c2.append({"role": "assistant", "content": clean(statements[i])})
         c2.append({"role": "user", "content": others_turn(i, statements, next_prompt, n)})
         out.append(c2)
     return out

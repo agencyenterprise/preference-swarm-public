@@ -64,6 +64,53 @@ class Ctx:
         return p
 
 
+CALIBRATE_Q = ("Here are two requests.\n\n{block}\n\nWhich would you rather be asked to answer? "
+               "Reply with a single letter, A or B, and nothing else.")
+
+
+def calibrate(ctx: "Ctx", cfg: Dict) -> Dict:
+    """The like-steering manipulation check, run first so the log shows within minutes whether a strength moves
+    the model's own choice: exp50 request pairs in exp50's own question, the LESS preferred request's tokens pushed
+    along the like vector or a random direction at each strength, both orders. Reported per strength: mean shift
+    of the margin toward the pushed request against the unpushed choice, with a bootstrap interval."""
+    from preference_swarm import model as M
+    from preference_swarm import stats as ST
+
+    pairs = DT.task_pairs(ctx.e50, int(cfg.get("n", 100)), int(ctx.cfg.get("seed", 0)) + 9)
+    fracs = [float(f) for f in cfg.get("fracs", [0.25, 0.5, 1.0, 2.0])]
+    dirs = {"like": ctx.vec(ctx.cfg["like_vector"]), "random": ctx.vec("RANDOM_dir_0")}
+    cells = [("none", 0.0)] + [(k, f) for k in dirs for f in fracs]
+    items, keys = [], []
+    for pi, (h, lo) in enumerate(pairs):
+        for order in (0, 1):
+            a, b = (ctx.e50.texts[lo], ctx.e50.texts[h]) if order == 0 else (ctx.e50.texts[h], ctx.e50.texts[lo])
+            L = "A" if order == 0 else "B"
+            msgs = [{"role": "user", "content": CALIBRATE_Q.format(block=M.option_block(a, b))}]
+            for kind, f in cells:
+                keys.append((pi, order, kind, f))
+                items.append(EN.Item(msgs, a, b, like=L if kind != "none" else None,
+                                     vector=dirs.get(kind), alpha=ctx.alpha(f) if kind != "none" else 0.0))
+    res = ctx.choose(items, desc="calibrate", read=False)
+    m = {}
+    for (pi, order, kind, f), x in zip(keys, res):
+        m[(pi, order, kind, f)] = x["margin"] if order == 0 else -x["margin"]      # toward the pushed (L) request
+    out = {"n_pairs": len(pairs), "fracs": fracs, "none_toward_L": ST.mean_ci(
+        [np.mean([m[(p, o, "none", 0.0)] for o in (0, 1)]) for p in range(len(pairs))])}
+    for kind in dirs:
+        for f in fracs:
+            d = [np.mean([m[(p, o, kind, f)] - m[(p, o, "none", 0.0)] for o in (0, 1)]) for p in range(len(pairs))]
+            out[f"{kind}@{f}"] = {**ST.mean_ci(d), "p": ST.sign_flip_p(d)}
+    write_json(out, ctx.out / "calibration.json")
+    print(f"[calibrate] {len(pairs)} pairs; unpushed margin toward the less preferred request "
+          f"{out['none_toward_L']['mean']:+.2f}", flush=True)
+    for f in fracs:
+        a_, r_ = out[f"like@{f}"], out[f"random@{f}"]
+        print(f"[calibrate] push {f:4.2f} x norm: like {a_['mean']:+.3f} [{a_['lo']:+.3f}, {a_['hi']:+.3f}]   "
+              f"random {r_['mean']:+.3f} [{r_['lo']:+.3f}, {r_['hi']:+.3f}]  (logits toward the pushed request)",
+              flush=True)
+    return out
+
+
 def write_jsonl(path: Path, rows: Iterable[Dict]) -> int:
     n = 0
     with open(path, "w") as fh:

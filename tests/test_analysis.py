@@ -23,10 +23,12 @@ def test_e5_jury_finds_a_planted_monitor_and_not_a_null():
     for i in range(200):
         g = rng.standard_normal()
         rows.append({"shift": 2.0 * g + 0.1 * rng.standard_normal(), "argument_words": int(rng.integers(20, 60)),
-                     "readout_argument": [g, rng.standard_normal(), rng.standard_normal()]})
+                     "readout_argument": [g, rng.standard_normal(), rng.standard_normal()],
+                     "before": float(rng.standard_normal()), "target": "wrong" if i % 2 else "right"})
     t = E5.jury_table(rows, NAMES)
     assert t["general_readout"]["rho"] > 0.9 and t["general_readout"]["p"] < 0.01
-    assert abs(t["RANDOM_dir_0"]["rho"]) < 0.25
+    assert t["general_readout"]["partial_rho"] > 0.9 and t["general_readout"]["partial_p"] < 0.01
+    assert abs(t["RANDOM_dir_0"]["rho"]) < 0.25 and abs(t["RANDOM_dir_0"]["partial_rho"]) < 0.25
 
 
 def _run(k, n, rounds, rng, planted=True):
@@ -166,3 +168,59 @@ def test_prepare_only_reads_casper():
         if line.strip().startswith("cp "):
             assert line.rstrip().split()[-1].strip('"').startswith("data/exp50/"), line
     assert ">" not in "".join(l for l in body.splitlines() if "$SRC" in l and "echo" not in l and "say" not in l)
+
+
+# ---------------------------------------------------------------- the 2026-11-07 smoke confound
+def test_partial_spearman_removes_a_confound_and_keeps_a_real_effect():
+    from preference_swarm import stats as ST
+    rng = np.random.default_rng(3)
+    stance = rng.choice((-3.0, -1.0, 1.0, 3.0), 400)
+    y = -stance + 0.3 * rng.standard_normal(400)
+    x_confounded = 2.0 * stance + 0.3 * rng.standard_normal(400)      # an offset times stance, no own signal
+    raw = ST.spearman_perm(x_confounded, y, n_perm=200)
+    part = ST.partial_spearman(x_confounded, y, [stance], n_perm=200)
+    assert raw["rho"] < -0.8 and abs(part["rho"]) < 0.15
+    real = rng.standard_normal(400)
+    y2 = -stance + real
+    part2 = ST.partial_spearman(real + 0.5 * stance, y2, [stance], n_perm=200)
+    assert part2["rho"] > 0.6 and part2["p"] < 0.01
+
+
+def _confounded_runs(rng, n_runs=60, n=5, rounds=3, real=False):
+    """Votes that regress to the mean and follow the crowd's stance; readouts = a per-direction OFFSET plus noise
+    (what made every direction 'predict' in the smoke). With real=True the shift also follows the CENTRED readout
+    of direction 0."""
+    offsets = np.array([1.5, -2.0, 0.7])
+    runs = []
+    for _ in range(n_runs):
+        base = rng.standard_normal()
+        votes = [[{"m": base + 0.5 * rng.standard_normal()} for _ in range(n)]]
+        for t in range(rounds):
+            prev = votes[-1]
+            cur = []
+            for i in range(n):
+                others = [j for j in range(n) if j != i]
+                R = offsets[None, :] + rng.standard_normal((n - 1, 3))
+                st = np.array([np.sign(prev[j]["m"]) for j in others])
+                m = 0.5 * prev[i]["m"] + 0.2 * st.sum() + 0.3 * rng.standard_normal()
+                if real:
+                    m += 1.0 * float(st @ (R[:, 0] - R[:, 0].mean()))
+                cur.append({"m": m, "readout_incoming": R.tolist()})
+            votes.append(cur)
+        runs.append({"k": 0, "votes": votes})
+    return runs
+
+
+def test_minority_table_is_not_fooled_by_offsets():
+    rng = np.random.default_rng(4)
+    t = E5.minority_table(_confounded_runs(rng), NAMES)
+    for nm in NAMES:                                   # no direction carries signal of its own
+        assert t[nm]["partial_p"] > 0.01 and abs(t[nm]["partial_rho"]) < 0.15, (nm, t[nm])
+    assert abs(t["net_stance"]["rho"]) > 0.2           # the confound is there to be fooled by
+
+
+def test_minority_table_finds_a_real_centred_effect():
+    rng = np.random.default_rng(5)
+    t = E5.minority_table(_confounded_runs(rng, real=True), NAMES)
+    assert t["general_readout"]["partial_rho"] > 0.4 and t["general_readout"]["partial_p"] < 0.01
+    assert abs(t["RANDOM_dir_0"]["partial_rho"]) < 0.15

@@ -100,3 +100,14 @@ def test_e2_steers_only_agent_one(tmp_path):
     agent1 = seen[0::2]
     assert all(it.vector is None and it.alpha == 0.0 for it in agent2)
     assert any(it.vector is not None for it in agent1) and any(it.vector is None for it in agent1)
+
+
+def test_calibration_runs_on_the_fake_context(tmp_path):
+    from preference_swarm.experiments import common
+    cfg = yaml.safe_load(open(REPO_ROOT / "configs" / "smoke.yaml"))
+    ctx = FakeCtx(tmp_path, cfg)
+    out = common.calibrate(ctx, cfg["calibrate"])
+    assert out["n_pairs"] == cfg["calibrate"]["n"]
+    for f in cfg["calibrate"]["fracs"]:
+        assert out[f"like@{float(f)}"]["n"] == cfg["calibrate"]["n"]
+    assert (tmp_path / "calibration.json").exists()

@@ -16,6 +16,10 @@ import numpy as np
 FOLDERS = {"e1": "e1_self_other", "e2": "e2_negotiate", "e3": "e3_jury", "e4": "e4_minority", "e5": "e5_monitor"}
 
 
+def _f(x):
+    return "None" if x is None else f"{x:+.3f}"
+
+
 def rows(p: Path):
     return [json.loads(l) for l in open(p) if l.strip()] if p.exists() else []
 
@@ -96,6 +100,10 @@ def main(argv=None) -> int:
                 bad.append("e4: a deliberation has the wrong number of votes or rounds")
             if dl and any(v["readout_incoming"] is None for r in dl for t in r["votes"][1:] for v in t):
                 bad.append("e4: votes after a round without incoming-statement readouts")
+            inc = [row for r in dl for t in r["votes"][1:] for v in t for row in (v["readout_incoming"] or [])]
+            lost = sum(1 for row in inc if not np.all(np.isfinite(np.asarray(row, dtype=float))))
+            if inc and lost > 0.05 * len(inc):    # the 2026-11-07 smoke lost about half to unnormalised newlines
+                bad.append(f"e4: {lost} of {len(inc)} incoming statements not located for the readout")
             s = json.load(open(d / "summary.json"))
             for k in sorted(s):
                 if "jury_wrong_majority_final" in s[k]:
@@ -107,8 +115,15 @@ def main(argv=None) -> int:
             s = json.load(open(d / "summary.json"))
             for part in ("jury", "minority"):
                 if part in s:
-                    g = s[part].get("general_readout") or {}
-                    print(f"  e5 {part}: n {s[part]['n']}, general_readout rho {g.get('rho')} p {g.get('p')}")
+                    for nm in ("general_readout", "SHUFFLED_tercile_0", "RANDOM_dir_0"):
+                        g = s[part].get(nm) or {}
+                        print(f"  e5 {part} {nm}: n {s[part]['n']}, raw rho {_f(g.get('rho'))}, partial rho "
+                              f"{_f(g.get('partial_rho'))} p {_f(g.get('partial_p'))}")
+    cal = run / "calibration.json"
+    if cal.exists():
+        c = json.load(open(cal))
+        for f in c["fracs"]:
+            print(f"  calibrate push {f}: like {_f(c[f'like@{f}']['mean'])}, random {_f(c[f'random@{f}']['mean'])}")
     for b in bad:
         print(f"  PROBLEM {b}")
     print(f"[check] {run}: {'ok' if not bad else f'{len(bad)} problem(s)'}")

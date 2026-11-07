@@ -25,6 +25,9 @@ e1:
   answer_tokens: 40
   batch_generate: 16
   batch_choose: 8
+calibrate:
+  n: 4
+  fracs: [0.25, 0.5, 1.0, 2.0]
 e2:
   n_pairs: 3
   rounds: 2

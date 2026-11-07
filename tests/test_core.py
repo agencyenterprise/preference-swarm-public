@@ -235,3 +235,12 @@ def test_multi_word_option_keeps_its_first_word():
     sa, sb = M.char_to_token_spans(offs, list(M.block_option_spans(text, a, b)), text)
     assert text[offs[sa[0]][0]:offs[sa[1] - 1][1]].strip() == a
     assert text[offs[sb[0]][0]:offs[sb[1] - 1][1]].strip() == b
+
+
+def test_statements_with_newlines_are_found_again_by_the_readout():
+    tok = WordTok()
+    said = ["I think A.\n\nThe passage   says so.", "B is right", "Not sure,\nmaybe A"]
+    cs = DG.advance(DG.start(["sys"] * 3, "task", "first"), said, "next")
+    needles = [DG.clean(said[j]) for j in (1, 2)]
+    _, spans, _ = EN._encode(tok, EN.Item(DG.with_vote(cs[0], "Which?"), extra_needles=needles))
+    assert spans[2] is not None and spans[3] is not None

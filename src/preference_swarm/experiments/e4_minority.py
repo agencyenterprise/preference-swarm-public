@@ -75,8 +75,7 @@ def run(ctx: Ctx, cfg: Dict) -> Dict:
         flat = []
         for k, (r, c) in enumerate(zip(runs, ctxs)):
             for i in range(n):
-                extra = [] if last_said[k] is None else [" ".join(last_said[k][j].strip().split())
-                                                         for j in range(n) if j != i]
+                extra = [] if last_said[k] is None else [DG.clean(last_said[k][j]) for j in range(n) if j != i]
                 flat.append(item(r, i, DG.with_vote(c[i], VOTE_Q), extra))
         res = ctx.choose(flat, desc=f"e4 vote {tag}")
         for k, r in enumerate(runs):

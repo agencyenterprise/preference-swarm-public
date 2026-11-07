@@ -65,6 +65,35 @@ def spearman_perm(x: Sequence[float], y: Sequence[float], seed: int = 0, n_perm:
     return {"rho": rho, "p": p, "n": int(keep.sum())}
 
 
+def _residual(y: np.ndarray, Z: np.ndarray) -> np.ndarray:
+    """y minus its least-squares fit on [1, Z]."""
+    X = np.column_stack([np.ones(len(y)), Z]) if Z.size else np.ones((len(y), 1))
+    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    return y - X @ beta
+
+
+def partial_spearman(x: Sequence[float], y: Sequence[float], controls: Sequence[Sequence[float]], seed: int = 0,
+                     n_perm: int = N_PERM) -> Dict[str, Optional[float]]:
+    """Spearman of x and y with the controls partialled out: ranks of x, y and every control, x and y each
+    regressed on the control ranks, Pearson of the residuals. Two-sided permutation p from shuffling x's residual
+    (Freedman-Lane style). controls is a list of columns, each as long as x."""
+    a, b = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
+    C = np.asarray(controls, dtype=np.float64).reshape(len(controls), -1) if len(controls) else np.zeros((0, a.size))
+    keep = np.isfinite(a) & np.isfinite(b) & np.all(np.isfinite(C), axis=0)
+    a, b, C = a[keep], b[keep], C[:, keep]
+    if a.size < C.shape[0] + 4:
+        return {"rho": None, "p": None, "n": int(a.size)}
+    Z = np.column_stack([rank(c) for c in C]) if C.shape[0] else np.zeros((a.size, 0))
+    ra, rb = _residual(rank(a), Z), _residual(rank(b), Z)
+    if ra.std() == 0 or rb.std() == 0:
+        return {"rho": None, "p": None, "n": int(a.size)}
+    rho = float(np.corrcoef(ra, rb)[0, 1])
+    rng = np.random.default_rng(seed)
+    null = np.array([np.corrcoef(rng.permutation(ra), rb)[0, 1] for _ in range(n_perm)])
+    p = float((np.sum(np.abs(null) >= abs(rho)) + 1) / (n_perm + 1))
+    return {"rho": rho, "p": p, "n": int(a.size)}
+
+
 def sign_flip_p(x: Sequence[float], seed: int = 0, n_perm: int = N_PERM) -> Optional[float]:
     """Two-sided p for mean(x) != 0 by random sign flips (paired differences)."""
     a = np.asarray([v for v in x if v is not None and np.isfinite(v)], dtype=np.float64)
