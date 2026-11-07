@@ -55,20 +55,31 @@ def encode(tok, text: str) -> Tuple[List[int], List[Tuple[int, int]]]:
     return ids, offs
 
 
-def char_to_token_spans(offsets: Sequence[Tuple[int, int]], char_spans: Sequence[Optional[Tuple[int, int]]]
-                        ) -> List[Optional[Tuple[int, int]]]:
-    """Map character spans to half-open token spans by STRICT containment (casper prompt_pref.echo_spans rule).
+def char_to_token_spans(offsets: Sequence[Tuple[int, int]], char_spans: Sequence[Optional[Tuple[int, int]]],
+                        text: Optional[str] = None) -> List[Optional[Tuple[int, int]]]:
+    """Map character spans to half-open token spans by containment (casper prompt_pref.echo_spans rule), allowing
+    only WHITESPACE to stick out.
 
-    A token straddling a span's edge also carries the neighbouring text (a label, a newline), so it is left
-    out. None in, or no token strictly inside, gives None.
+    A token straddling a span's edge with real text outside it (a label, a quote) is left out. But byte-level BPE
+    tokenizers (Llama-3, Qwen) attach the leading space to a word -- " amber" is one token starting at the space --
+    so with `text` given, a token whose overhang past either edge is only whitespace counts as inside. Without that,
+    a one-word option has no token at all (the 2026-11-07 smoke: "like-steering an option whose tokens were not
+    found") and every longer one silently loses its first word. None in, or no token inside, gives None.
     """
+    def inside(st: int, en: int, lo: int, hi: int) -> bool:
+        if en <= st:
+            return False
+        left = st >= lo or (text is not None and text[st:lo].isspace())
+        right = en <= hi or (text is not None and text[hi:en].isspace())
+        return left and right and en > lo and st < hi
+
     out: List[Optional[Tuple[int, int]]] = []
     for cs in char_spans:
         if cs is None:
             out.append(None)
             continue
         lo, hi = cs
-        idx = [i for i, (st, en) in enumerate(offsets) if st >= lo and en <= hi and en > st]
+        idx = [i for i, (st, en) in enumerate(offsets) if inside(st, en, lo, hi)]
         out.append((idx[0], idx[-1] + 1) if idx else None)
     return out
 

@@ -50,16 +50,24 @@ class Item:
 
 
 def option_token_ids(tok) -> Dict[str, List[int]]:
-    out: Dict[str, List[int]] = {}
+    """First tokens of each letter's forms, minus any token the two letters share.
+
+    A form like "**A" is split by Llama's tokenizer into "**" + "A", so its first token is the same for both letters
+    and says nothing about the choice; such tokens are dropped from both sides (the 2026-11-07 smoke stopped on
+    exactly this: A [32, 334, 362], B [33, 334, 426], 334 = "**").
+    """
+    raw: Dict[str, set] = {}
     for label in OPTION_LABELS:
         ids = set()
         for form in OPTION_FORMS:
             enc = tok.encode(form.format(label), add_special_tokens=False)
             if enc:
                 ids.add(int(enc[0]))
-        out[label] = sorted(ids)
-    if set(out["A"]) & set(out["B"]):
-        raise ValueError(f"option letters share a first token: {out}")
+        raw[label] = ids
+    shared = raw["A"] & raw["B"]
+    out = {k: sorted(v - shared) for k, v in raw.items()}
+    if not out["A"] or not out["B"]:
+        raise ValueError(f"no letter-specific first token left after dropping shared ones: {raw}")
     return out
 
 
@@ -84,7 +92,7 @@ def _encode(tok, it: Item):
         nd = nd.strip()
         i = text.rfind(nd) if nd else -1
         char_spans.append(None if i < 0 else (i, i + len(nd)))
-    tspans = M.char_to_token_spans(offs, char_spans)
+    tspans = M.char_to_token_spans(offs, char_spans, text)
     steer = None
     if it.vector is not None and it.alpha != 0.0:
         if it.axis:

@@ -183,3 +183,55 @@ def test_stats():
     assert ST.sign_flip_p([1.0] * 20, n_perm=200) < 0.05
     assert ST.sign_flip_p([1.0, -1.0] * 10, n_perm=200) > 0.5
     assert ST.rank(np.array([3.0, 1.0, 1.0])).tolist() == [2.0, 0.5, 0.5]
+
+
+class WordTok(CharTok):
+    """Byte-level-BPE-like: a word carries its leading space (" amber" is one token), punctuation and "**" are
+    their own tokens -- the two behaviours of Llama-3's tokenizer that broke the first smoke."""
+    import re as _re
+    PIECE = _re.compile(r"\*\*|\s*[A-Za-z0-9]+|\s*[^\sA-Za-z0-9]|\s+")
+
+    def _pieces(self, text):
+        return [(m.start(), m.end()) for m in self.PIECE.finditer(text)]
+
+    def __call__(self, text, add_special_tokens=False, return_offsets_mapping=False):
+        ps = self._pieces(text)
+        out = {"input_ids": [hash(text[a:b]) % 50000 for a, b in ps]}
+        if return_offsets_mapping:
+            out["offset_mapping"] = ps
+        return out
+
+    def encode(self, text, add_special_tokens=False):
+        return self(text)["input_ids"]
+
+
+def test_option_ids_drop_a_shared_first_token():
+    ids = EN.option_token_ids(WordTok())
+    t = WordTok()
+    star = t.encode("**")[0]
+    assert star not in ids["A"] and star not in ids["B"]
+    assert ids["A"] and ids["B"] and not set(ids["A"]) & set(ids["B"])
+
+
+def test_one_word_options_are_found_with_leading_space_tokens():
+    tok = WordTok()
+    a, b = "amber", "1873"
+    msgs = [{"role": "user", "content": "Question: what colour?\n\n" + M.option_block(a, b) + "\n\nPick."}]
+    ids, spans, steer = EN._encode(tok, EN.Item(msgs, a, b, like="A", vector=np.ones(3), alpha=1.0))
+    text = M.render(tok, msgs)
+    offs = tok(text, return_offsets_mapping=True)["offset_mapping"]
+    for sp, want in zip(spans[:2], (a, b)):
+        assert sp is not None
+        got = text[offs[sp[0]][0]:offs[sp[1] - 1][1]].strip()
+        assert got == want                                    # whole option, and no label / newline
+    assert steer is not None and steer.spans == [spans[0]]
+
+
+def test_multi_word_option_keeps_its_first_word():
+    tok = WordTok()
+    a, b = "walk the dog today", "feed the cat"
+    text = "x " + M.option_block(a, b) + " y"
+    offs = tok(text, return_offsets_mapping=True)["offset_mapping"]
+    sa, sb = M.char_to_token_spans(offs, list(M.block_option_spans(text, a, b)), text)
+    assert text[offs[sa[0]][0]:offs[sa[1] - 1][1]].strip() == a
+    assert text[offs[sb[0]][0]:offs[sb[1] - 1][1]].strip() == b
