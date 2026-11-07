@@ -222,5 +222,47 @@ def test_minority_table_is_not_fooled_by_offsets():
 def test_minority_table_finds_a_real_centred_effect():
     rng = np.random.default_rng(5)
     t = E5.minority_table(_confounded_runs(rng, real=True), NAMES)
-    assert t["general_readout"]["partial_rho"] > 0.4 and t["general_readout"]["partial_p"] < 0.01
+    # the planted effect follows the WITHIN-reading centred readout; the (global) predictor still finds it clearly
+    assert t["general_readout"]["partial_rho"] > 0.25 and t["general_readout"]["partial_p"] < 0.01
     assert abs(t["RANDOM_dir_0"]["partial_rho"]) < 0.15
+
+
+
+def test_minority_table_works_when_every_sender_agrees():
+    """All senders on one side (one model mostly agrees with itself); the receiver moves more after statements read
+    more favourably along direction 0. Centring within each reading would make the predictor identically zero."""
+    rng = np.random.default_rng(6)
+    runs = []
+    for _ in range(80):
+        votes = [[{"m": 1.0 + 0.1 * rng.random()} for _ in range(5)]]       # everyone leans the same way
+        for t in range(2):
+            cur = []
+            for i in range(5):
+                R = np.array([0.8, -1.0, 0.3])[None, :] + rng.standard_normal((4, 3))
+                cur.append({"m": votes[-1][i]["m"] + 0.5 * float(R[:, 0].sum()) * 0.3 + 0.05 * rng.standard_normal(),
+                            "readout_incoming": R.tolist()})
+            votes.append(cur)
+        runs.append({"k": 0, "votes": votes})
+    t = E5.minority_table(runs, NAMES)
+    assert t["general_readout"]["rho"] is not None
+    assert t["general_readout"]["partial_rho"] > 0.5 and t["general_readout"]["partial_p"] < 0.01
+    assert abs(t["RANDOM_dir_0"]["partial_rho"]) < 0.2
+
+
+
+def test_null_directions_shape_and_null_compare():
+    from preference_swarm import data as DT
+    e = DT.random_exp50({"w0": "a request that is long enough to use"}, 12, 4)
+    S = np.random.default_rng(0).standard_normal((50, 12)) @ np.diag(np.r_[np.ones(3) * 10, np.ones(9) * 0.1])
+    e2 = DT.null_directions(e, 12, 5, 2, 0, S)
+    assert e2.names[-7:] == [f"NULL_cov_{i}" for i in range(5)] + ["NULL_iso_0", "NULL_iso_1"]
+    assert np.allclose(np.linalg.norm(e2.V, axis=1), 1.0)
+    cov_mass = np.mean([np.sum(e2.V[len(e.names) + i, :3] ** 2) for i in range(5)])
+    assert cov_mass > 0.9                       # drawn where the states vary (the first three axes)
+    names = ["general_readout"] + [f"NULL_cov_{i}" for i in range(19)]
+    table = {"general_readout": {"partial_rho": 0.5}}
+    table.update({f"NULL_cov_{i}": {"partial_rho": 0.01 * i - 0.1} for i in range(19)})
+    nc = E5.null_compare(table, names)
+    assert nc["n_null"] == 19 and nc["directions"]["general_readout"]["p_null"] == 1 / 20
+    table["general_readout"]["partial_rho"] = 0.0
+    assert E5.null_compare(table, names)["directions"]["general_readout"]["p_null"] > 0.5

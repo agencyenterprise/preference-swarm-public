@@ -147,6 +147,11 @@ def open_ctx(cfg: Dict, out: Path) -> Ctx:
             raise ValueError(f"exp50 directions were fitted on {ctx.e50.model}, the config loads {cfg['model']}")
         if ctx.e50.V.shape[1] != d:
             raise ValueError(f"exp50 directions have width {ctx.e50.V.shape[1]}, the model {d}")
+    nc = dict(cfg.get("null_directions") or {})
+    if nc:
+        st = None if src == "random" else DT.load_states(Path(src) if Path(src).is_absolute() else REPO_ROOT / src)
+        ctx.e50 = DT.null_directions(ctx.e50, d, int(nc.get("cov", 30)), int(nc.get("iso", 10)),
+                                     int(cfg.get("seed", 0)), st)
     ctx.layer = int(cfg.get("layer") or ctx.e50.layer)
     if src != "random" and ctx.layer != ctx.e50.layer:
         raise ValueError(f"config layer {ctx.layer} differs from the layer exp50 read the directions at "

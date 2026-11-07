@@ -127,3 +127,36 @@ def task_pairs(e: Exp50, n: int, seed: int) -> List[Tuple[str, str]]:
         hi, lo = (x, y) if e.score[x] >= e.score[y] else (y, x)
         out.append((hi, lo))
     return out
+
+
+NULL_PREFIX = "NULL_"
+
+
+def null_directions(e: Exp50, d: int, n_cov: int, n_iso: int, seed: int, states: "np.ndarray | None" = None
+                    ) -> Exp50:
+    """e with control directions appended for READING only (never steered): n_cov random directions where the
+    states vary -- unit(Sc^T z), Sc the centred exp50 request states, z standard normal (the shape of exp50's own
+    RANDOM_dir_*) -- and n_iso isotropic ones. With no states (the smoke) all are isotropic. They give each
+    readout analysis a null distribution of directions that sees the same data and the same clustering."""
+    rng = np.random.default_rng(seed + 50)
+    rows, names = [], []
+    if states is not None and n_cov:
+        Sc = np.asarray(states, dtype=np.float64)
+        Sc = Sc - Sc.mean(axis=0, keepdims=True)
+        for i in range(n_cov):
+            v = Sc.T @ rng.standard_normal(Sc.shape[0])
+            rows.append(v / np.linalg.norm(v))
+            names.append(f"{NULL_PREFIX}cov_{i}")
+    for i in range(n_iso + (0 if states is not None else n_cov)):
+        v = rng.standard_normal(d)
+        rows.append(v / np.linalg.norm(v))
+        names.append(f"{NULL_PREFIX}iso_{i}")
+    if not rows:
+        return e
+    return e._replace(names=list(e.names) + names, V=np.vstack([e.V, np.stack(rows)]))
+
+
+def load_states(d: Path):
+    """exp50's request states (S) if prepare_data copied them, else None."""
+    f = Path(d) / "states.npz"
+    return np.load(f)["S"] if f.exists() else None

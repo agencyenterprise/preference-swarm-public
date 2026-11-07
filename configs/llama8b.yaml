@@ -10,6 +10,7 @@ max_new_tokens: 120
 batch_choose: 16
 batch_generate: 96
 experiments: [e3, e4, e2, e5]
+null_directions: {cov: 30, iso: 10}
 calibrate:
   n: 100
   fracs: [0.25, 0.5, 1.0, 2.0]

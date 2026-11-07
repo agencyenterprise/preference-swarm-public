@@ -148,7 +148,7 @@ def choose(hf, tok, layer: int, items: Sequence[Item], directions: Optional[np.n
             for r, i in enumerate(idx):
                 read = None if hook.readings is None else hook.readings[r]
                 out[i] = {"margin": margin_from_logprobs(lp[r], ids_map),
-                          "readout": None if read is None else read.tolist(),
+                          "readout": None if read is None else np.round(read, 4).tolist(),
                           "n_tokens": len(enc[i][0])}
     return out
 

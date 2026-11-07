@@ -20,6 +20,9 @@ class FakeCtx:
     def __init__(self, out: Path, cfg: dict):
         texts = {json.loads(l)["name"]: json.loads(l)["text"] for l in open(REPO_ROOT / "data" / "smoke_prompts.jsonl")}
         self.e50 = DT.random_exp50(texts, 16, 4)
+        nc = cfg.get("null_directions") or {}
+        if nc:                                    # as common.open_ctx does (the smoke has no states: all isotropic)
+            self.e50 = DT.null_directions(self.e50, 16, int(nc["cov"]), int(nc["iso"]), 0, None)
         self.cfg, self.out, self.scale = cfg, out, 10.0
         self.rng = np.random.default_rng(0)
         self.calls = {"choose": 0, "generate": 0}

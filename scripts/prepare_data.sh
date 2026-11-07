@@ -10,7 +10,7 @@ status=0
 for M in Llama-3.1-8B-Instruct Qwen2.5-7B-Instruct; do
   mkdir -p "data/exp50/$M"
   cp "$SRC/data/prompts.jsonl" "data/exp50/$M/prompts.jsonl"
-  for f in judge_rows.json general_pref.json vectors.npz; do
+  for f in judge_rows.json general_pref.json vectors.npz states.npz; do
     if [ -f "$SRC/$M/$f" ]; then cp "$SRC/$M/$f" "data/exp50/$M/$f"; else say "MISSING $SRC/$M/$f"; status=1; fi
   done
   say "$M: $(ls "data/exp50/$M" | tr '\n' ' ')"

@@ -115,10 +115,17 @@ def main(argv=None) -> int:
             s = json.load(open(d / "summary.json"))
             for part in ("jury", "minority"):
                 if part in s:
+                    g0 = s[part].get("general_readout") or {}
+                    if s[part]["n"] > 10 and g0.get("rho") is None:   # the second 2026-11-07 smoke: constant predictor
+                        bad.append(f"e5 {part}: the general_readout predictor has no variance (n {s[part]['n']})")
+                    nc = s[part].get("null_comparison") or {}
                     for nm in ("general_readout", "SHUFFLED_tercile_0", "RANDOM_dir_0"):
                         g = s[part].get(nm) or {}
+                        pn = (nc.get("directions") or {}).get(nm, {}).get("p_null")
                         print(f"  e5 {part} {nm}: n {s[part]['n']}, raw rho {_f(g.get('rho'))}, partial rho "
-                              f"{_f(g.get('partial_rho'))} p {_f(g.get('partial_p'))}")
+                              f"{_f(g.get('partial_rho'))}, p against {nc.get('n_null')} null directions {_f(pn)}")
+                    if cfg.get("null_directions") and not nc.get("n_null"):
+                        bad.append(f"e5 {part}: no null directions to compare against")
     cal = run / "calibration.json"
     if cal.exists():
         c = json.load(open(cal))

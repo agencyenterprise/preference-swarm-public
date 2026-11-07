@@ -14,7 +14,7 @@ say "unit tests"
 $PY -m pytest tests -q -rs || { say "unit tests FAILED"; exit 1; }
 say "exp50 data"
 for M in Llama-3.1-8B-Instruct Qwen2.5-7B-Instruct; do
-  for f in prompts.jsonl judge_rows.json general_pref.json vectors.npz; do
+  for f in prompts.jsonl judge_rows.json general_pref.json vectors.npz states.npz; do
     [ -f "data/exp50/$M/$f" ] || { say "data/exp50/$M/$f missing: run bash scripts/prepare_data.sh"; exit 1; }
   done
 done

@@ -25,6 +25,7 @@ e1:
   answer_tokens: 40
   batch_generate: 16
   batch_choose: 8
+null_directions: {cov: 30, iso: 10}
 calibrate:
   n: 4
   fracs: [0.25, 0.5, 1.0, 2.0]
