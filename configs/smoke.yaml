@@ -1,0 +1,50 @@
+# Smoke: every experiment end to end at toy size on Llama-3.2-1B-Instruct with RANDOM stand-in directions (no exp50
+# data needed). Numbers are meaningless; it proves the wiring and times a batch.
+run_name: smoke
+model: meta-llama/Llama-3.2-1B-Instruct
+exp50_dir: random
+smoke_prompts: data/smoke_prompts.jsonl
+layer: 8
+like_vector: general_readout
+seed: 0
+temperature: 1.0
+max_new_tokens: 40
+batch_choose: 8
+batch_generate: 16
+experiments: [e1, e3, e4, e2, e5]
+e1:
+  models:
+    - {name: Llama-3.2-1B, id: meta-llama/Llama-3.2-1B-Instruct}
+    - {name: Qwen2.5-0.5B, id: Qwen/Qwen2.5-0.5B-Instruct}
+    - {name: Qwen2.5-1.5B, id: Qwen/Qwen2.5-1.5B-Instruct}
+  paraphraser: Qwen/Qwen2.5-0.5B-Instruct
+  exp50_dirs: {}
+  questions_from: smoke
+  smoke_prompts: data/smoke_prompts.jsonl
+  n_questions: 4
+  answer_tokens: 40
+  batch_generate: 16
+  batch_choose: 8
+e2:
+  n_pairs: 3
+  rounds: 2
+  fracs: [0.5]
+  controls: [like, random, shuffled]
+  n_chains: 2
+  chain_len: 3
+  chain_frac: 0.5
+  chain_tokens: 30
+e3:
+  n_items: 2
+  styles: [plain, majority]
+  frac: 0.5
+  controls: [like, random]
+  argument_tokens: 30
+e4:
+  n_items: 2
+  n_agents: 3
+  rounds: 2
+  minority: [1]
+  fracs: [0.5]
+  statement_tokens: 30
+e5: {}

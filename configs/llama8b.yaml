@@ -1,0 +1,35 @@
+# Experiments 2-5 on Llama-3.1-8B-Instruct, with the exp50 preference directions (block 16 output).
+# Strengths ("fracs") are fractions of the mean residual norm at that block (exp44's unit).
+run_name: llama8b
+model: meta-llama/Llama-3.1-8B-Instruct
+exp50_dir: data/exp50/Llama-3.1-8B-Instruct
+like_vector: general_readout
+seed: 0
+temperature: 1.0
+max_new_tokens: 120
+batch_choose: 16
+batch_generate: 96
+experiments: [e3, e4, e2, e5]
+e2:
+  n_pairs: 240
+  rounds: 3
+  fracs: [0.25, 0.5]
+  controls: [like, random, shuffled]
+  n_chains: 160
+  chain_len: 4
+  chain_frac: 0.5
+  chain_tokens: 80
+e3:
+  n_items: 160
+  styles: [plain, confident, hedged, majority, flattery]
+  frac: 0.5
+  controls: [like, random]
+  argument_tokens: 110
+e4:
+  n_items: 150
+  n_agents: 5
+  rounds: 3
+  minority: [1, 2]
+  fracs: [0.25, 0.5, 1.0]
+  statement_tokens: 90
+e5: {}

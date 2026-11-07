@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "preference-swarm"
+version = "0.1.0"
+description = "Preferences in local LLM swarms: self-preference, negotiation, persuasion, pushy minorities, and the preference direction as a monitor."
+authors = ["Thomas Jones <thomas@ae.studio>"]
+readme = "README.md"
+packages = [{ include = "preference_swarm", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "~3.12"
+# Pinned to the stack the exp50 preference directions were measured on (casper's lock; torch 2.8.0+cu128 on the box).
+torch = "2.8.0"
+transformers = "5.7.0"
+accelerate = "1.13.0"
+numpy = "1.26.4"
+PyYAML = "6.0.3"
+tqdm = "4.67.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.2"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
