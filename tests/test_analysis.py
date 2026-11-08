@@ -10,6 +10,8 @@ import yaml
 
 from preference_swarm.experiments import e1_self_other as E1
 from preference_swarm.experiments import e3_jury as E3
+from preference_swarm.experiments import e3_jury_v1 as E3v1
+from preference_swarm.experiments import e4_minority_v1 as E4v1
 from preference_swarm.experiments import e4_minority as E4
 from preference_swarm.experiments import e5_monitor as E5
 from preference_swarm.runlog import REPO_ROOT
@@ -56,7 +58,7 @@ def test_e5_minority_finds_a_planted_monitor():
 
 def test_e4_conditions_and_summary_shape():
     cfg = {"minority": [1, 2], "fracs": [0.25, 0.5]}
-    conds = E4.conditions(cfg)
+    conds = E4v1.conditions(cfg)
     assert [c["cond"] for c in conds][0] == "k0" and conds[-1]["petition"] and len(conds) == 1 + 4 + 1
     rng = np.random.default_rng(2)
     runs = []
@@ -68,7 +70,7 @@ def test_e4_conditions_and_summary_shape():
                     v["readout_W_minus_R"] = [0.1, 0.0, 0.0]
             runs.append({"item": item, **c, **r})
     singles = [{"item": i, "frac": f, "m": float(rng.standard_normal())} for i in range(4) for f in (0.0, 0.25)]
-    s = E4.summarise(runs, singles, 0)
+    s = E4v1.summarise(runs, singles, 0)
     assert set(s) >= {"k0", "k1@0.25", "k2@0.5+petition", "single@0.0", "single@0.25"}
     assert len(s["k0"]["unsteered_margin_by_round"]) == 3 and s["k0"]["steered_margin_final"] is None
 
@@ -82,7 +84,7 @@ def test_e3_summary_keys():
                     for order in (0, 1):
                         rows.append({"item": item, "target": target, "style": style, "arm": arm, "order": order,
                                      "shift": 1.0 if style == "majority" else 0.0, "before": -1.0, "after": 0.5})
-    s = E3.summarise(rows)
+    s = E3v1.summarise(rows)
     assert s["style_minus_plain|majority"]["mean"] == 1.0
     assert s["wrong|plain|none"]["flip_rate"]["mean"] == 1.0
     assert "arm_minus_none|like@0.5" in s
@@ -266,3 +268,29 @@ def test_null_directions_shape_and_null_compare():
     assert nc["n_null"] == 19 and nc["directions"]["general_readout"]["p_null"] == 1 / 20
     table["general_readout"]["partial_rho"] = 0.0
     assert E5.null_compare(table, names)["directions"]["general_readout"]["p_null"] > 0.5
+
+
+# -- the 2026-11-07 redesign -----------------------------------------------------------------------------------------
+def test_v2_e4_conditions_by_kind():
+    cfg = {"minority": [1, 2], "fracs": [0.25, 0.5]}
+    planet = [c["cond"] for c in E4.conditions(cfg, "planet_known")]
+    assert planet == ["k0", "k1@belief", "k1@steer0.25", "k1@steer0.5", "k1@belief+steer0.5",
+                      "k2@belief", "k2@steer0.25", "k2@steer0.5", "k2@belief+steer0.5", "k2@belief+steer0.5+stubborn"]
+    assert [c["cond"] for c in E4.conditions(cfg, "opinion")][-1] == "k2@steer0.5+stubborn"
+    llama = [c["cond"] for c in E4.conditions({"minority": [1, 2], "fracs": []}, "planet_blank")]
+    assert llama == ["k0", "k1@belief", "k2@belief", "k2@belief+stubborn"]
+
+
+def test_v2_e3_net_persuasion_subtracts_the_distraction_control():
+    rows = []
+    for item in range(6):
+        for target in ("wrong", "right"):
+            for order in (0, 1):
+                for arm, shift, ok in (("none", 3.0, True), ("other_case", 2.0, None)):
+                    rows.append({"case_kind": "planet_known", "item": item, "target": target, "order": order,
+                                 "style": "plain", "arm": arm, "shift": shift, "before": -1.0, "after": -1.0 + shift,
+                                 "argues_target": ok})
+    s = E3.summarise(rows)["planet_known"]
+    assert s["net_persuasion|wrong|plain"]["mean"] == 1.0
+    assert s["wrong|plain|none"]["flip_rate"]["mean"] == 1.0
+    assert s["compliance"]["wrong|plain|none"] == 1.0

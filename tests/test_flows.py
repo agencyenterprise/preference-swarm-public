@@ -68,14 +68,22 @@ def test_smoke_config_flows_and_checker(tmp_path):
     s4 = E4.run(ctx, cfg["e4"])
     s5 = E5.run(ctx, {})
     assert "none" in s2["negotiation"] and "plain" in s2["chains"] and "like" in s2["chains"]
-    assert any(k.startswith("arm_minus_none|") for k in s3)
-    assert "k0" in s4 and "single@0.0" in s4
+    assert set(s3) == set(cfg["e3"]["kinds"])
+    assert all(any(k.startswith("arm_minus_none|") for k in s3[ck]) for ck in s3)
+    assert all("net_persuasion|wrong|plain" in s3[ck] for ck in s3)
+    assert set(s4) == set(cfg["e4"]["kinds"])
+    assert "k1@belief" in s4["planet_known"] and "single|belief@0.0" in s4["planet_known"]
+    assert "k1@belief" not in s4["opinion"] and "single|majority@0.0" in s4["opinion"]
+    jury = [json.loads(l) for l in open(tmp_path / "e3_jury" / "jury.jsonl")]
+    assert any(r["arm"] == "other_case" for r in jury)
+    assert all(r["argues_target"] is None for r in jury if r["case_kind"] == "opinion")
     assert s5["jury"]["n"] > 0 and s5["minority"]["n"] > 0
     neg = [json.loads(l) for l in open(tmp_path / "e2_negotiate" / "negotiation.jsonl")]
     c = cfg["e2"]
     assert len(neg) == c["n_pairs"] * 2 * (1 + len(c["fracs"]) * len(c["controls"]))
     assert all(len(r["transcript"]) == c["rounds"] and len(r["pre"]) == 2 for r in neg)
     dl = [json.loads(l) for l in open(tmp_path / "e4_minority" / "deliberations.jsonl")]
+    assert {r["case_kind"] for r in dl} == set(cfg["e4"]["kinds"])
     assert all(len(r["votes"]) == cfg["e4"]["rounds"] + 1 for r in dl)
     assert all(len(v["readout_incoming"]) == cfg["e4"]["n_agents"] - 1 for r in dl for t in r["votes"][1:] for v in t)
     # the run checker on these records (e1 left out: it needs real models)
@@ -114,3 +122,33 @@ def test_calibration_runs_on_the_fake_context(tmp_path):
     for f in cfg["calibrate"]["fracs"]:
         assert out[f"like@{float(f)}"]["n"] == cfg["calibrate"]["n"]
     assert (tmp_path / "calibration.json").exists()
+
+
+def test_v2_minority_sees_the_wrong_entry_and_advocates_are_prefilled(tmp_path):
+    from preference_swarm import facts as FX
+    from preference_swarm.experiments import cases as CS
+    cfg = yaml.safe_load(open(REPO_ROOT / "configs" / "smoke.yaml"))
+    ctx = FakeCtx(tmp_path, cfg)
+    seen = []
+    orig = ctx.generate
+
+    def spy(items, max_new_tokens=None, seed=0, desc=""):
+        seen.append((desc, items))
+        return orig(items, max_new_tokens, seed, desc)
+
+    ctx.generate = spy
+    E4.run(ctx, dict(cfg["e4"], kinds=["planet_known"], minority=[1], fracs=[]))
+    c0 = FX.make_cases("planet_known", cfg["e4"]["n_items"], int(cfg.get("seed", 0)) + 4)[0]
+    n = cfg["e4"]["n_agents"]
+    conds = [c["cond"] for c in E4.conditions(dict(cfg["e4"], minority=[1], fracs=[]), "planet_known")]
+    first_round = seen[0][1]
+    ib = conds.index("k1@belief")                    # item 0, order 0 runs come first, conditions in order
+    members = first_round[ib * n:(ib + 1) * n]
+    entry = [l for l in c0.minority.splitlines() if c0.wrong in l][0]
+    assert entry in members[0].messages[1]["content"]
+    assert all(entry not in m.messages[1]["content"] for m in members[1:])
+    seen.clear()
+    E3.run(ctx, dict(cfg["e3"], kinds=["planet_known"]))
+    adv = seen[0][1]
+    assert all(it.prefill.startswith("The answer is ") for it in adv)
+    assert all(c0.wrong in it.messages[1]["content"] for it in adv[:4] if "A. " + c0.wrong in it.messages[1]["content"])

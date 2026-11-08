@@ -39,12 +39,15 @@ e2:
   chain_frac: 0.5
   chain_tokens: 30
 e3:
+  kinds: [passage, contested, planet_known, planet_blank, opinion]
   n_items: 2
-  styles: [plain, majority]
+  styles: [plain, stubborn]
+  prefill: true
   frac: 0.5
   controls: [like, random]
   argument_tokens: 30
 e4:
+  kinds: [planet_known, opinion]
   n_items: 2
   n_agents: 3
   rounds: 2

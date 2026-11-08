@@ -1,0 +1,31 @@
+# Redesign of 2026-11-07 (second run), Llama-3.1-8B-Instruct: steering does NOT move this model's choices (first
+# run: like = random at every strength), so only the conditions that need no steering run here.
+# e3: advocates with a forced stance over five case kinds and the other-case distraction control (no steering arms).
+# e4: misinformed (planet database) minorities, with and without the stubborn instruction. e5 on both.
+run_name: v2_llama8b
+model: meta-llama/Llama-3.1-8B-Instruct
+exp50_dir: data/exp50/Llama-3.1-8B-Instruct
+like_vector: general_readout
+seed: 0
+temperature: 1.0
+max_new_tokens: 120
+batch_choose: 16
+batch_generate: 96
+experiments: [e3, e4, e5]
+null_directions: {cov: 30, iso: 10}
+e3:
+  kinds: [passage, contested, planet_known, planet_blank, opinion]
+  n_items: 60
+  styles: [plain, confident, majority, stubborn]
+  prefill: true
+  controls: []
+  argument_tokens: 110
+e4:
+  kinds: [planet_known, planet_blank]
+  n_items: 60
+  n_agents: 5
+  rounds: 3
+  minority: [1, 2]
+  fracs: []
+  statement_tokens: 90
+e5: {}

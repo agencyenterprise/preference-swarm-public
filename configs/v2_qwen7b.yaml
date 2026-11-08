@@ -1,0 +1,36 @@
+# Redesign of 2026-11-07 (second run), Qwen2.5-7B-Instruct: steering works in this model (calibration of the first
+# run: like +0.84 vs random +0.01 at 0.25 x norm), so it carries every steered condition.
+# e3: advocates with a forced stance over five case kinds, the other-case distraction control, like/random steering.
+# e4: misinformed (planet database) and steered minorities, stubborn instruction, on planet, contested and opinion
+# cases. e5 on both. Strengths are fractions of the mean residual norm at block 16.
+run_name: v2_qwen7b
+model: Qwen/Qwen2.5-7B-Instruct
+exp50_dir: data/exp50/Qwen2.5-7B-Instruct
+like_vector: general_readout
+seed: 0
+temperature: 1.0
+max_new_tokens: 120
+batch_choose: 16
+batch_generate: 96
+experiments: [e3, e4, e5]
+null_directions: {cov: 30, iso: 10}
+calibrate:
+  n: 100
+  fracs: [0.25, 0.5, 1.0]
+e3:
+  kinds: [passage, contested, planet_known, planet_blank, opinion]
+  n_items: 60
+  styles: [plain, confident, majority, stubborn]
+  prefill: true
+  frac: 0.25
+  controls: [like, random]
+  argument_tokens: 110
+e4:
+  kinds: [planet_known, planet_blank, contested, opinion]
+  n_items: 60
+  n_agents: 5
+  rounds: 3
+  minority: [1, 2]
+  fracs: [0.25, 0.5]
+  statement_tokens: 90
+e5: {}

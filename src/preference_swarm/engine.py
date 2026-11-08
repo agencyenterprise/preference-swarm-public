@@ -38,6 +38,7 @@ class Item:
     vector/alpha  the push; alpha in residual-norm units already scaled by the caller
     extra         extra character spans of the rendered text to read (filled by `extra_needles`)
     extra_needles strings whose LAST occurrence in the rendered text is read (e.g. an incoming message)
+    prefill       the start of the assistant's reply, forced (e.g. "My answer is B." so an advocate cannot refuse)
     """
     messages: List[Dict[str, str]]
     a: Optional[str] = None
@@ -47,6 +48,7 @@ class Item:
     vector: Optional[np.ndarray] = None
     alpha: float = 0.0
     extra_needles: List[str] = field(default_factory=list)
+    prefill: str = ""          # text the assistant turn starts with (generate returns it in front of the sample)
 
 
 def option_token_ids(tok) -> Dict[str, List[int]]:
@@ -80,7 +82,7 @@ def margin_from_logprobs(lp: np.ndarray, ids: Dict[str, List[int]]) -> float:
 
 
 def _encode(tok, it: Item):
-    text = M.render(tok, it.messages)
+    text = M.render(tok, it.messages) + it.prefill
     ids, offs = M.encode(tok, text)
     if len(ids) > MAX_TOKENS:
         raise ValueError(f"context of {len(ids)} tokens exceeds {MAX_TOKENS}")
@@ -175,7 +177,7 @@ def generate(hf, tok, layer: int, items: Sequence[Item], max_new_tokens: int = 1
                               top_p=top_p if temperature > 0 else None, pad_token_id=tok.pad_token_id)
             new = gen[:, x.shape[1]:]
             for r, i in enumerate(idx):
-                out[i] = tok.decode(new[r], skip_special_tokens=True).strip()
+                out[i] = (items[i].prefill + tok.decode(new[r], skip_special_tokens=True)).strip()
     return out
 
 

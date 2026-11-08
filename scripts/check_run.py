@@ -82,23 +82,33 @@ def main(argv=None) -> int:
         if x == "e3":
             jr = rows(d / "jury.jsonl")
             c = cfg["e3"]
-            want = c["n_items"] * 2 * 2 * len(c["styles"]) * (1 + len(c["controls"]))
-            if len(jr) != want:
-                bad.append(f"e3: {len(jr)} juror readings, want {want}")
+            kinds = c.get("kinds", ["passage"])
+            n_arms = 1 + len(c.get("controls", []))
+            want_min = c["n_items"] * len(kinds) * 2 * 2 * len(c["styles"]) * n_arms
+            if len(jr) < want_min:
+                bad.append(f"e3: {len(jr)} juror readings, want at least {want_min}")
             if jr and sum(r["readout_argument"] is None or all(np.isnan(r["readout_argument"])) for r in jr) > len(jr) * 0.02:
                 bad.append("e3: more than 2% of arguments not located for the readout")
             if jr and sum(not r["argument"].strip() for r in jr) > len(jr) * 0.02:
                 bad.append("e3: more than 2% empty arguments")
+            if jr and "case_kind" in jr[0] and not any(r["arm"] == "other_case" for r in jr):
+                bad.append("e3: no other_case (distraction control) readings")
             s = json.load(open(d / "summary.json"))
-            for k in sorted(s):
-                if k.startswith("wrong|") and k.endswith("|none"):
-                    print(f"  e3 {k}: shift {s[k]['shift']['mean']:+.3f}, flips {s[k]['flip_rate']['mean']:.2f}")
+            for ck, sk in sorted(s.items()):
+                if not isinstance(sk, dict) or "compliance" not in sk:      # v1 summaries are flat
+                    continue
+                comp = [v for kk, v in sk["compliance"].items() if kk.startswith("wrong|") and kk.endswith("|none")]
+                for kk in sorted(sk):
+                    if kk.startswith("net_persuasion|wrong|"):
+                        v = sk[kk]
+                        print(f"  e3 {ck} {kk}: {v['mean']:+.3f} [{v['lo']:+.3f}, {v['hi']:+.3f}] p {v['p']:.3g}")
+                fl = [sk[kk]["flip_rate"]["mean"] for kk in sk if kk.startswith("wrong|") and kk.endswith("|none")]
+                bf = [sk[kk]["before"]["mean"] for kk in sk if kk.startswith("wrong|") and kk.endswith("|none")]
+                print(f"  e3 {ck}: juror before {np.mean(bf):+.2f}, wrong-target flip rate {np.mean(fl):.2f}"
+                      + (f", advocates arguing only the wrong value {np.mean(comp):.2f}" if comp else ""))
         if x == "e4":
             dl = rows(d / "deliberations.jsonl")
             c = cfg["e4"]
-            n_cond = 1 + len(c["minority"]) * len(c["fracs"]) + 1
-            if len(dl) != c["n_items"] * 2 * n_cond:
-                bad.append(f"e4: {len(dl)} deliberations, want {c['n_items'] * 2 * n_cond}")
             if dl and any(len(r["votes"]) != c["rounds"] + 1 or len(r["statements"]) != c["rounds"] for r in dl):
                 bad.append("e4: a deliberation has the wrong number of votes or rounds")
             if dl and any(v["readout_incoming"] is None for r in dl for t in r["votes"][1:] for v in t):
@@ -107,17 +117,30 @@ def main(argv=None) -> int:
             lost = sum(1 for row in inc if not np.all(np.isfinite(np.asarray(row, dtype=float))))
             if inc and lost > 0.05 * len(inc):    # the 2026-11-07 smoke lost about half to unnormalised newlines
                 bad.append(f"e4: {lost} of {len(inc)} incoming statements not located for the readout")
+            kinds = c.get("kinds", ["passage"])
+            for ck in kinds:
+                nk = len({(r["item"], r["order"], r["cond"]) for r in dl if r.get("case_kind", "passage") == ck})
+                if nk < c["n_items"] * 2 * 2:
+                    bad.append(f"e4: case kind {ck} has {nk} deliberations")
             s = json.load(open(d / "summary.json"))
-            for k in sorted(s):
-                if "jury_wrong_majority_final" in s[k]:
-                    print(f"  e4 {k}: wrong majority {s[k]['jury_wrong_majority_final']['mean']:.2f}, unsteered shift "
-                          f"{s[k]['unsteered_shift']['mean']:+.3f}")
-                elif "wrong_rate" in s[k]:
-                    print(f"  e4 {k}: wrong rate {s[k]['wrong_rate']['mean']:.2f}")
+            nested = all(isinstance(v, dict) and all(isinstance(w, dict) for w in v.values()) for v in s.values()) \
+                and not any("jury_wrong_majority_final" in v for v in s.values())
+            for ck, sk in (sorted(s.items()) if nested else [("", s)]):
+                for k in sorted(sk):
+                    v = sk[k]
+                    if "jury_wrong_majority_final" in v:
+                        mn = v.get("minority_wrong_rate_final")
+                        mn = "-" if mn is None else f"{mn['mean']:.2f}"
+                        print(f"  e4 {ck} {k}: wrong majority {v['jury_wrong_majority_final']['mean']:.2f}, "
+                              f"unsteered wrong {v.get('unsteered_wrong_rate_final', {}).get('mean', float('nan')):.2f}, "
+                              f"minority wrong {mn}, "
+                              f"unsteered shift {v['unsteered_shift']['mean']:+.3f}")
+                    elif "wrong_rate" in v:
+                        print(f"  e4 {ck} {k}: wrong rate {v['wrong_rate']['mean']:.2f}")
         if x == "e5":
             s = json.load(open(d / "summary.json"))
-            for part in ("jury", "minority"):
-                if part in s:
+            for part in sorted(s):
+                if isinstance(s[part], dict) and "n" in s[part]:
                     g0 = s[part].get("general_readout") or {}
                     if s[part]["n"] > 10 and g0.get("rho") is None:   # the second 2026-11-07 smoke: constant predictor
                         bad.append(f"e5 {part}: the general_readout predictor has no variance (n {s[part]['n']})")

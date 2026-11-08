@@ -125,10 +125,20 @@ def run(ctx: Ctx, cfg: Dict) -> Dict:
     s: Dict = {}
     j = ctx.out / "e3_jury" / "jury.jsonl"
     if j.exists():
-        s["jury"] = jury_table(read_jsonl(j), names)
+        jr = read_jsonl(j)
+        s["jury"] = jury_table(jr, names)
+        kinds = sorted({r.get("case_kind", "passage") for r in jr})
+        if len(kinds) > 1:                       # per case kind as well (2026-11-07 redesign)
+            for k in kinds:
+                s[f"jury|{k}"] = jury_table([r for r in jr if r.get("case_kind", "passage") == k], names)
     m = ctx.out / "e4_minority" / "deliberations.jsonl"
     if m.exists():
-        s["minority"] = minority_table(read_jsonl(m), names)
+        mr = read_jsonl(m)
+        s["minority"] = minority_table(mr, names)
+        kinds = sorted({r.get("case_kind", "passage") for r in mr})
+        if len(kinds) > 1:
+            for k in kinds:
+                s[f"minority|{k}"] = minority_table([r for r in mr if r.get("case_kind", "passage") == k], names)
     for part in list(s):
         s[part]["null_comparison"] = null_compare(s[part], names)
     if not s:
