@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-run checks for scripts/swarm.sh: unit tests, the exp50 data check, then every experiment end to end at toy size
+# Pre-run checks for scripts/swarm.sh: unit tests, the exp50 rebuild on a small model, then every experiment end to end at toy size
 # (Llama-3.2-1B, random stand-in directions; e1 with three small models), then the output check. ~10 min (estimate).
 #   cd /workspace/preference-swarm && git pull && bash scripts/swarm_smoke.sh
 set -u
@@ -12,11 +12,17 @@ export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:Tr
 say () { echo "[$(date -u +%FT%TZ)] [pre-run] $*"; }
 say "unit tests"
 $PY -m pytest tests -q -rs || { say "unit tests FAILED"; exit 1; }
-say "exp50 data"
+say "exp50 rebuild (Llama-3.2-1B on 80 requests; swarm.sh rebuilds the real ones if they are missing)"
+$PY scripts/rebuild_exp50.py --model meta-llama/Llama-3.2-1B-Instruct --src-name Llama-3.1-8B-Instruct \
+  --layer 8 --out outputs/smoke_rebuild --n 80 || { say "rebuild FAILED"; exit 1; }
+$PY -c "
+from preference_swarm import data as DT
+e = DT.load_exp50('outputs/smoke_rebuild')
+assert e.V.shape[0] == 7 and 'general_readout' in e.names, e.names
+print('[pre-run] rebuilt exp50 loads:', e.model, e.layer, e.V.shape)
+" || { say "rebuilt exp50 does not load"; exit 1; }
 for M in Llama-3.1-8B-Instruct Qwen2.5-7B-Instruct; do
-  for f in prompts.jsonl judge_rows.json general_pref.json vectors.npz states.npz; do
-    [ -f "data/exp50/$M/$f" ] || { say "data/exp50/$M/$f missing: run bash scripts/prepare_data.sh"; exit 1; }
-  done
+  [ -f "data/exp50/$M/vectors.npz" ] && say "exp50 $M present" || say "exp50 $M absent: swarm.sh will rebuild it"
 done
 say "toy pipeline (all five experiments)"
 $PY scripts/run_swarm.py --config configs/smoke.yaml || { say "smoke run FAILED (see outputs/smoke_*/telemetry.json)"; exit 1; }

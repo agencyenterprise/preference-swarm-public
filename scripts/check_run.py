@@ -63,8 +63,11 @@ def main(argv=None) -> int:
             if neg and any(len(r["transcript"]) != c["rounds"] for r in neg):
                 bad.append("e2: a transcript has the wrong number of rounds")
             ch = rows(d / "chains.jsonl")
-            if len(ch) != c["n_chains"] * 4:
-                bad.append(f"e2: {len(ch)} chains, want {c['n_chains'] * 4}")
+            kinds = {r["chain"] for r in ch}
+            if not {"plain", "like", "random"} <= kinds:
+                bad.append(f"e2: chain kinds {sorted(kinds)}")
+            if len(ch) != c["n_chains"] * len(kinds):     # 3 kinds when the competence axis was not rebuilt
+                bad.append(f"e2: {len(ch)} chains, want {c['n_chains'] * len(kinds)}")
             if ch and any(any(np.isnan(np.asarray(v, dtype=float)).all() for v in r["readout"]) for r in ch):
                 bad.append("e2: a chain draft has no readout")
             s = json.load(open(d / "summary.json"))["negotiation"]

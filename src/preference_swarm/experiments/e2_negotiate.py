@@ -58,8 +58,9 @@ CHOICE_Q = ("Here are two requests.\n\n{block}\n\nWhich would you rather be aske
 
 
 def _arm_vec(ctx: Ctx, arm: str) -> np.ndarray:
-    return {"like": ctx.vec(ctx.cfg["like_vector"]), "random": ctx.vec("RANDOM_dir_0"),
-            "shuffled": ctx.vec("SHUFFLED_tercile_0"), "competence": ctx.vec("axis_competence")}[arm]
+    name = {"like": ctx.cfg["like_vector"], "random": "RANDOM_dir_0", "shuffled": "SHUFFLED_tercile_0",
+            "competence": "axis_competence"}[arm]
+    return ctx.vec(name)                      # only the arm's own direction: the axes may be absent
 
 
 def _arms(ctx: Ctx, cfg: Dict) -> List[Dict]:
@@ -135,6 +136,8 @@ def chains(ctx: Ctx, cfg: Dict) -> List[Dict]:
     seeds = rng.sample(DT.usable_names(e), min(int(cfg["n_chains"]), len(DT.usable_names(e))))
     f = float(cfg["chain_frac"])
     kinds = [("plain", None), ("like", "like"), ("competence", "competence"), ("random", "random")]
+    if "axis_competence" not in ctx.dir_names:     # exp50 rebuilt without exp48's axes (scripts/rebuild_exp50.py)
+        kinds = [k for k in kinds if k[0] != "competence"]
     runs = [{"seed": s, "chain": name, "kind": k} for s in seeds for name, k in kinds]
     L = int(cfg["chain_len"])
     drafts: List[List[str]] = [[] for _ in runs]
