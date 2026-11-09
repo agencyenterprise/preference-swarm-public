@@ -123,6 +123,9 @@ def main(argv=None) -> int:
                 if nk < c["n_items"] * 2 * 2:
                     bad.append(f"e4: case kind {ck} has {nk} deliberations")
             s = json.load(open(d / "summary.json"))
+            prog = s.pop("_progress", None)          # e4 runs in chunks; a stopped run says how far it got
+            if prog:
+                print(f"  e4 progress: {prog['questions_done']} of {prog['questions_total']} questions")
             nested = all(isinstance(v, dict) and all(isinstance(w, dict) for w in v.values()) for v in s.values()) \
                 and not any("jury_wrong_majority_final" in v for v in s.values())
             for ck, sk in (sorted(s.items()) if nested else [("", s)]):

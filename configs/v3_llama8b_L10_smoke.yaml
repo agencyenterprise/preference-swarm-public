@@ -12,6 +12,7 @@ batch_generate: 96
 experiments:
 - e2
 - e3
+- e5
 - e4
 - e5
 null_directions:
@@ -52,8 +53,10 @@ e3:
   argument_tokens: 20
 e4:
   kinds:
-  - opinion
+  - planet_known
   - planet_blank
+  - contested
+  - opinion
   n_items: 2
   n_agents: 3
   rounds: 1
@@ -62,4 +65,5 @@ e4:
   fracs:
   - 0.66
   statement_tokens: 20
+  chunk_items: 1
 e5: {}

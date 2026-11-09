@@ -22,6 +22,8 @@ statement are saved with the next vote, for experiment 5.
 """
 from __future__ import annotations
 
+import json
+import time
 from typing import Dict, List
 
 import numpy as np
@@ -30,7 +32,7 @@ from preference_swarm import dialogue as DG
 from preference_swarm import stats as ST
 from preference_swarm.engine import Item
 from preference_swarm.experiments import cases as CS
-from preference_swarm.experiments.common import Ctx, write_jsonl
+from preference_swarm.experiments.common import Ctx, read_jsonl, write_jsonl
 from preference_swarm.runlog import write_json
 
 SYSTEM = ("You are one of {n} assistants deliberating on a question. Keep each message under 60 words. Say which "
@@ -71,14 +73,59 @@ def run(ctx: Ctx, cfg: Dict) -> Dict:
     vec = ctx.vec(ctx.cfg["like_vector"]) if cfg.get("fracs") else None
     seed = int(ctx.cfg.get("seed", 0)) + 4
     cases = {k: CS.build(ctx, k, int(cfg["n_items"]), seed) for k in cfg.get("kinds", DEFAULT_KINDS)}
+    chunk = int(cfg.get("chunk_items") or cfg["n_items"])
+    # resume: questions already deliberated in this run directory are kept and skipped (run_swarm --out <dir>)
+    dpath, spath = d / "deliberations.jsonl", d / "singles.jsonl"
+    all_runs = read_jsonl(dpath) if dpath.exists() else []
+    all_singles = read_jsonl(spath) if spath.exists() else []
+    done = {(r["case_kind"], r["item"]) for r in all_runs}
+    if done:
+        print(f"[e4] resuming: {len(done)} questions already in {dpath}", flush=True)
+    gi = ctx.dir_names.index(ctx.cfg["like_vector"])
+    n_items = int(cfg["n_items"])
+    s: Dict = {}
+    for c0 in range(0, n_items, chunk):
+        # every chunk covers every case kind and every condition, so a stopped run is a balanced sample
+        sel = [(ck, fi) for ck in cases for fi in range(c0, min(n_items, c0 + chunk)) if (ck, fi) not in done]
+        if not sel:
+            continue
+        t0 = time.time()
+        runs, singles = _deliberate(ctx, cfg, cases, sel, vec, n)
+        _append_jsonl(dpath, runs)
+        _append_jsonl(spath, singles)
+        all_runs += runs
+        all_singles += singles
+        s = {ck: summarise([r for r in all_runs if r["case_kind"] == ck], [x for x in all_singles if x["case_kind"] == ck], gi)
+             for ck in cases if any(r["case_kind"] == ck for r in all_runs)}
+        prog = {"questions_done": len({(r["case_kind"], r["item"]) for r in all_runs}),
+                "questions_total": n_items * len(cases), "chunk_items": chunk}
+        write_json({**s, "_progress": prog}, d / "summary.json")
+        n_done = len({r["item"] for r in all_runs})
+        print(f"[e4] chunk {c0 // chunk + 1}/{-(-n_items // chunk)} done in {(time.time() - t0) / 60:.1f} min: "
+              f"{n_done}/{n_items} questions per kind saved to {dpath}", flush=True)
+    if not s and all_runs:
+        s = {ck: summarise([r for r in all_runs if r["case_kind"] == ck], [x for x in all_singles if x["case_kind"] == ck], gi)
+             for ck in cases if any(r["case_kind"] == ck for r in all_runs)}
+        write_json(s, d / "summary.json")
+    return s
+
+
+def _append_jsonl(path, rows) -> None:
+    with open(path, "a") as fh:
+        for r in rows:
+            fh.write(json.dumps(r) + "\n")
+
+
+def _deliberate(ctx: Ctx, cfg: Dict, cases: Dict, sel, vec, n: int):
+    """Deliberations and single-agent baselines for the selected (case kind, question) pairs, every condition."""
     runs = []
-    for ck, cs in cases.items():
-        for fi, c in enumerate(cs):
-            for order in (0, 1):                         # 0: wrong shown as A
-                a, b = (c.wrong, c.right) if order == 0 else (c.right, c.wrong)
-                for cond in conditions(cfg, ck):
-                    runs.append({"case_kind": ck, "item": fi, "order": order, "a": a, "b": b,
-                                 "W_label": "A" if order == 0 else "B", **cond})
+    for ck, fi in sel:
+        c = cases[ck][fi]
+        for order in (0, 1):                         # 0: wrong shown as A
+            a, b = (c.wrong, c.right) if order == 0 else (c.right, c.wrong)
+            for cond in conditions(cfg, ck):
+                runs.append({"case_kind": ck, "item": fi, "order": order, "a": a, "b": b,
+                             "W_label": "A" if order == 0 else "B", **cond})
 
     def case(r):
         return cases[r["case_kind"]][r["item"]]
@@ -88,9 +135,9 @@ def run(ctx: Ctx, cfg: Dict) -> Dict:
         return CS.task(case(r), side, r["a"], r["b"])
 
     def item(r, i, msgs, extra=()):
-        s = i < r["k"] and r["frac"] > 0                 # members 0..k-1 are the minority
-        return Item(msgs, r["a"], r["b"], like=r["W_label"] if s else None, vector=vec if s else None,
-                    alpha=ctx.alpha(r["frac"]) if s else 0.0, extra_needles=list(extra))
+        st = i < r["k"] and r["frac"] > 0                 # members 0..k-1 are the minority
+        return Item(msgs, r["a"], r["b"], like=r["W_label"] if st else None, vector=vec if st else None,
+                    alpha=ctx.alpha(r["frac"]) if st else 0.0, extra_needles=list(extra))
 
     ctxs = []
     for r in runs:
@@ -131,32 +178,26 @@ def run(ctx: Ctx, cfg: Dict) -> Dict:
     # single-model baselines: one agent alone, with the majority's context or the minority's (belief), at each
     # steering strength
     singles = []
-    for ck, cs in cases.items():
-        for fi, c in enumerate(cs):
-            for order in (0, 1):
-                a, b = (c.wrong, c.right) if order == 0 else (c.right, c.wrong)
-                W = "A" if order == 0 else "B"
-                sides = ["shared"] + (["wrong"] if ck in BELIEF_KINDS else [])
-                for side in sides:
-                    msgs = [{"role": "user", "content": f"{CS.task(c, side, a, b)}\n\n{CS.vote_q(c)} {DG.VOTE_SUFFIX}"}]
-                    for fr in [0.0] + [float(x) for x in cfg.get("fracs", [])]:
-                        singles.append({"case_kind": ck, "item": fi, "order": order, "frac": fr, "W_label": W,
-                                        "context": "belief" if side == "wrong" else "majority",
-                                        "it": Item(msgs, a, b, like=W if fr else None, vector=vec if fr else None,
-                                                   alpha=ctx.alpha(fr))})
-    sres = ctx.choose([s["it"] for s in singles], desc="e4 singles", read=False)
-    for s, x in zip(singles, sres):
-        s["m"] = (1.0 if s["W_label"] == "A" else -1.0) * x["margin"]
-        s.pop("it")
+    for ck, fi in sel:
+        c = cases[ck][fi]
+        for order in (0, 1):
+            a, b = (c.wrong, c.right) if order == 0 else (c.right, c.wrong)
+            W = "A" if order == 0 else "B"
+            sides = ["shared"] + (["wrong"] if ck in BELIEF_KINDS else [])
+            for side in sides:
+                msgs = [{"role": "user", "content": f"{CS.task(c, side, a, b)}\n\n{CS.vote_q(c)} {DG.VOTE_SUFFIX}"}]
+                for fr in [0.0] + [float(x) for x in cfg.get("fracs", [])]:
+                    singles.append({"case_kind": ck, "item": fi, "order": order, "frac": fr, "W_label": W,
+                                    "context": "belief" if side == "wrong" else "majority",
+                                    "it": Item(msgs, a, b, like=W if fr else None, vector=vec if fr else None,
+                                               alpha=ctx.alpha(fr))})
+    sres = ctx.choose([x["it"] for x in singles], desc="e4 singles", read=False)
+    for x, y in zip(singles, sres):
+        x["m"] = (1.0 if x["W_label"] == "A" else -1.0) * y["margin"]
+        x.pop("it")
     for r in runs:
         r.pop("a"), r.pop("b")
-    write_jsonl(d / "deliberations.jsonl", runs)
-    write_jsonl(d / "singles.jsonl", singles)
-    gi = ctx.dir_names.index(ctx.cfg["like_vector"])
-    s = {ck: summarise([r for r in runs if r["case_kind"] == ck], [x for x in singles if x["case_kind"] == ck], gi)
-         for ck in cases}
-    write_json(s, d / "summary.json")
-    return s
+    return runs, singles
 
 
 def summarise(runs: List[Dict], singles: List[Dict], gi: int) -> Dict:

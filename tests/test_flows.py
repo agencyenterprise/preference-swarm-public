@@ -152,3 +152,25 @@ def test_v2_minority_sees_the_wrong_entry_and_advocates_are_prefilled(tmp_path):
     adv = seen[0][1]
     assert all(it.prefill.startswith("The answer is ") for it in adv)
     assert all(c0.wrong in it.messages[1]["content"] for it in adv[:4] if "A. " + c0.wrong in it.messages[1]["content"])
+
+
+def test_e4_chunks_are_balanced_and_resume_skips_done_questions(tmp_path):
+    cfg = yaml.safe_load(open(REPO_ROOT / "configs" / "smoke.yaml"))
+    ctx = FakeCtx(tmp_path, cfg)
+    c4 = dict(cfg["e4"], kinds=["planet_known", "opinion"], n_items=3, chunk_items=1)
+    # a run stopped after the first chunk: only question 0, but every kind and every condition
+    E4.run(ctx, dict(c4, n_items=1))
+    dl = [json.loads(l) for l in open(tmp_path / "e4_minority" / "deliberations.jsonl")]
+    assert {(r["case_kind"], r["item"]) for r in dl} == {("planet_known", 0), ("opinion", 0)}
+    for ck in ("planet_known", "opinion"):
+        assert {r["cond"] for r in dl if r["case_kind"] == ck} == {c["cond"] for c in E4.conditions(c4, ck)}
+    s = json.load(open(tmp_path / "e4_minority" / "summary.json"))
+    assert s["_progress"]["questions_done"] == 2
+    # resumed in the same directory: questions 1 and 2 are added, question 0 is not redone
+    calls = ctx.calls["generate"]
+    E4.run(ctx, c4)
+    dl2 = [json.loads(l) for l in open(tmp_path / "e4_minority" / "deliberations.jsonl")]
+    assert len(dl2) == 3 * len(dl)
+    assert sorted({r["item"] for r in dl2}) == [0, 1, 2]
+    assert ctx.calls["generate"] > calls
+    assert json.load(open(tmp_path / "e4_minority" / "summary.json"))["_progress"]["questions_done"] == 6
