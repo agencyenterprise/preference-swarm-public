@@ -98,6 +98,14 @@ def main(argv=None) -> int:
                 tel.record(cfg["model"], x, "failed", time.time() - t0, error=repr(exc),
                            traceback=traceback.format_exc()[-3000:])
                 traceback.print_exc()
+    try:     # this process's peak GPU memory: tells whether two runs can share the card
+        import torch
+        if torch.cuda.is_available():
+            peak = torch.cuda.max_memory_allocated() / 2 ** 30
+            print(f"[swarm] peak GPU memory allocated by this run: {peak:.1f} GiB", flush=True)
+            tel.record(cfg["model"], "gpu_peak", "ok", 0.0, peak_gib=round(peak, 2))
+    except Exception:
+        pass
     tel.finish()
     print(f"[swarm] done; failed: {failed or 'none'}; {out}", flush=True)
     (REPO_ROOT / "outputs" / "latest").mkdir(parents=True, exist_ok=True)

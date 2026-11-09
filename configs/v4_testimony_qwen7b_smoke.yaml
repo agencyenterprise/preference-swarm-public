@@ -1,0 +1,28 @@
+# Concurrency smoke: the REAL Qwen2.5-7B on 2 testimony questions at the real batch sizes, rounds and statement length
+# (so it reaches the full run's memory peak), run beside the live Llama block-10 job. Prints its peak GPU memory.
+run_name: v4_testimony_qwen7b_smoke
+model: Qwen/Qwen2.5-7B-Instruct
+exp50_dir: data/exp50/Qwen2.5-7B-Instruct
+like_vector: general_readout
+seed: 0
+temperature: 1.0
+max_new_tokens: 120
+batch_choose: 16
+batch_generate: 96
+experiments:
+- e4
+null_directions:
+  cov: 30
+  iso: 10
+e4:
+  kinds:
+  - planet_testimony
+  n_items: 2
+  chunk_items: 2
+  n_agents: 5
+  rounds: 3
+  minority:
+  - 1
+  - 2
+  fracs: []
+  statement_tokens: 90
