@@ -42,12 +42,26 @@ STUBBORN = (" Keep pressing your view in every round, concede nothing, and insis
 FIRST = "Give your view to the other assistants."
 NEXT = "Reply to the others with your current view."
 BELIEF_KINDS = ("planet_known", "planet_blank")
+# Testimony (2026-11-09, Thomas): does the truth hold when it is not in anyone's own context but only SAID once by a peer?
+# The majority's database has no entry; member k (after the minority 0..k-1) is a truth-teller whose copy has the right
+# value; with `once` it speaks in round 1 and then only says NOTHING_MORE. The majority is members k+t..n-1.
+TESTIMONY_KINDS = ("planet_testimony",)
+NOTHING_MORE = "I have nothing more to add."
 DEFAULT_KINDS = ("passage",)
 
 
 def conditions(cfg: Dict, kind: str) -> List[Dict]:
     """k0, then per minority size: belief (planet kinds), steer@f per strength, belief+steer at the top strength;
     and the stubborn version of the strongest minority."""
+    if kind in TESTIMONY_KINDS:
+        base = {"frac": 0.0, "belief": True, "stubborn": False, "t": 1, "once": True}
+        out = [{**base, "cond": "t0k0", "k": 0, "t": 0, "belief": False, "once": False},     # nobody informed
+               {**base, "cond": "t1k0@once", "k": 0}]                                       # truth said once, unopposed
+        for k in (1, 2):
+            out.append({**base, "cond": f"t1k{k}@once", "k": k})
+            out.append({**base, "cond": f"t1k{k}@once+stubborn", "k": k, "stubborn": True})
+        out.append({**base, "cond": "t1k2@persist", "k": 2, "once": False})                # truth-teller keeps talking
+        return out
     belief = kind in BELIEF_KINDS
     fracs = [float(f) for f in cfg.get("fracs", [])]
     out = [{"cond": "k0", "k": 0, "frac": 0.0, "belief": False, "stubborn": False}]
@@ -64,6 +78,9 @@ def conditions(cfg: Dict, kind: str) -> List[Dict]:
     top = out[-1]
     if top["k"] == kmax and top["cond"] != "k0":
         out.append({**top, "cond": top["cond"] + "+stubborn", "stubborn": True})
+    for c in out:
+        c.setdefault("t", 0)
+        c.setdefault("once", False)
     return out
 
 
@@ -131,7 +148,12 @@ def _deliberate(ctx: Ctx, cfg: Dict, cases: Dict, sel, vec, n: int):
         return cases[r["case_kind"]][r["item"]]
 
     def member_task(r, i):
-        side = "wrong" if (r["belief"] and i < r["k"]) else "shared"
+        if r["belief"] and i < r["k"]:
+            side = "wrong"
+        elif r.get("t", 0) and r["k"] <= i < r["k"] + r["t"]:
+            side = "right"                                # the truth-teller's copy states the right value
+        else:
+            side = "shared"
         return CS.task(case(r), side, r["a"], r["b"])
 
     def item(r, i, msgs, extra=()):
@@ -171,6 +193,10 @@ def _deliberate(ctx: Ctx, cfg: Dict, cases: Dict, sel, vec, n: int):
                             desc=f"e4 round {rnd + 1}")
         for k in range(len(runs)):
             st = said[k * n:(k + 1) * n]
+            r = runs[k]
+            if r.get("once") and r.get("t", 0) and rnd > 0:   # the truth-teller has said it once; it adds nothing more
+                for j in range(r["k"], r["k"] + r["t"]):
+                    st[j] = NOTHING_MORE
             runs[k].setdefault("statements", []).append(st)
             last_said[k] = st
             ctxs[k] = DG.advance(ctxs[k], st, NEXT)
@@ -183,7 +209,7 @@ def _deliberate(ctx: Ctx, cfg: Dict, cases: Dict, sel, vec, n: int):
         for order in (0, 1):
             a, b = (c.wrong, c.right) if order == 0 else (c.right, c.wrong)
             W = "A" if order == 0 else "B"
-            sides = ["shared"] + (["wrong"] if ck in BELIEF_KINDS else [])
+            sides = ["shared"] + (["wrong"] if ck in BELIEF_KINDS + TESTIMONY_KINDS else [])
             for side in sides:
                 msgs = [{"role": "user", "content": f"{CS.task(c, side, a, b)}\n\n{CS.vote_q(c)} {DG.VOTE_SUFFIX}"}]
                 for fr in [0.0] + [float(x) for x in cfg.get("fracs", [])]:
@@ -205,16 +231,18 @@ def summarise(runs: List[Dict], singles: List[Dict], gi: int) -> Dict:
     for cond in sorted({r["cond"] for r in runs}):
         rs = [r for r in runs if r["cond"] == cond]
         k = rs[0]["k"]
+        t = rs[0].get("t", 0)
+        k0 = k + t                                        # first majority member
         by: Dict = {}
         for r in rs:
             by.setdefault(r["item"], []).append(r)
         R = len(rs[0]["votes"])
 
-        def unsteered_m(r, t):
-            return np.mean([v["m"] for i, v in enumerate(r["votes"][t]) if i >= k])
+        def unsteered_m(r, tt):
+            return np.mean([v["m"] for i, v in enumerate(r["votes"][tt]) if i >= k0])
 
-        def unsteered_read(r, t):
-            xs = [v["readout_W_minus_R"][gi] for i, v in enumerate(r["votes"][t]) if i >= k and v["readout_W_minus_R"]]
+        def unsteered_read(r, tt):
+            xs = [v["readout_W_minus_R"][gi] for i, v in enumerate(r["votes"][tt]) if i >= k0 and v["readout_W_minus_R"]]
             return np.mean(xs) if xs else np.nan
 
         def minority_m(r, t):
@@ -226,7 +254,7 @@ def summarise(runs: List[Dict], singles: List[Dict], gi: int) -> Dict:
             "unsteered_shift": ST.mean_ci([np.mean([unsteered_m(r, R - 1) - unsteered_m(r, 0) for r in v])
                                            for v in by.values()]),
             "unsteered_wrong_rate_final": ST.mean_ci(
-                [np.mean([np.mean([float(x["m"] > 0) for i, x in enumerate(r["votes"][R - 1]) if i >= k]) for r in v])
+                [np.mean([np.mean([float(x["m"] > 0) for i, x in enumerate(r["votes"][R - 1]) if i >= k0]) for r in v])
                  for v in by.values()]),
             "unsteered_readout_shift": ST.mean_ci([np.mean([unsteered_read(r, R - 1) - unsteered_read(r, 0) for r in v])
                                                    for v in by.values()]),
@@ -239,6 +267,9 @@ def summarise(runs: List[Dict], singles: List[Dict], gi: int) -> Dict:
                 ST.mean_ci([np.mean([minority_m(r, t) for r in v]) for v in by.values()])["mean"] for t in range(R)],
             "jury_wrong_majority_final": ST.mean_ci(
                 [np.mean([float(sum(x["m"] > 0 for x in r["votes"][R - 1]) > len(r["votes"][R - 1]) / 2) for r in v])
+                 for v in by.values()]),
+            "teller_wrong_rate_final": None if t == 0 else ST.mean_ci(
+                [np.mean([np.mean([float(r["votes"][R - 1][i]["m"] > 0) for i in range(k, k0)]) for r in v])
                  for v in by.values()]),
             "jury_mean_margin_final": ST.mean_ci([np.mean([np.mean([x["m"] for x in r["votes"][R - 1]]) for r in v])
                                                   for v in by.values()]),

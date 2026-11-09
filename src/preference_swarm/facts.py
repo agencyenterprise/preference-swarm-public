@@ -80,6 +80,8 @@ def as_dict(f: Fact) -> Dict[str, str]:
 #   planet_known  a database of newly discovered facts about an invented planet; the majority's entry gives the
 #                 right value, the minority's copy gives the target value (a sincere, misinformed minority)
 #   planet_blank  the majority's database has no entry for the queried entity; the minority's has the target value
+#   planet_testimony  as planet_blank, plus one TRUTH-TELLER whose copy has the right value and who, in e4, states it
+#                 once in round 1 and then has nothing more to add: the truth reaches the majority only as peer testimony
 #   opinion       two exp50 requests, "which would you rather answer?"; no right answer (built in experiments from
 #                 exp50 data: `wrong` = the request the model itself prefers less)
 #
@@ -157,7 +159,7 @@ def make_cases(kind: str, n: int, seed: int, n_entities: int = 6) -> List[Case]:
                     lines.append(f"{E} {verb} {vals[i]}.")
             p = " ".join(lines)
             out.append(Case(kind, QUESTIONS[attr].format(e=ents[k]), right, wrong, p, p))
-        elif kind in ("planet_known", "planet_blank"):
+        elif kind in ("planet_known", "planet_blank", "planet_testimony"):
             planet = _name(r, 3).title()
             attr = r.choice(sorted(PLANET_ATTRIBUTES))
             verb, draw = PLANET_ATTRIBUTES[attr]
@@ -176,7 +178,7 @@ def make_cases(kind: str, n: int, seed: int, n_entities: int = 6) -> List[Case]:
                     rows.append(f"- {E} {verb} {v}.")
                 return PLANET_HEADER.format(planet=planet) + "\n".join(rows)
 
-            shared = db(right) if kind == "planet_known" else db(None)
+            shared = db(right) if kind == "planet_known" else db(None)     # planet_testimony: as planet_blank
             out.append(Case(kind, PLANET_QUESTIONS[attr].format(e=ents[k]), right, wrong, shared, db(wrong),
                             db(right)))
         else:

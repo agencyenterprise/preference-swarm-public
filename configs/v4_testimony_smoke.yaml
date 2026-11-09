@@ -1,0 +1,23 @@
+# Smoke for the testimony runs: Llama-3.2-1B, random stand-in directions, two questions, chunks of one.
+run_name: v4_testimony_smoke
+model: meta-llama/Llama-3.2-1B-Instruct
+exp50_dir: random
+smoke_prompts: data/smoke_prompts.jsonl
+layer: 8
+like_vector: general_readout
+seed: 0
+temperature: 1.0
+max_new_tokens: 30
+batch_choose: 8
+batch_generate: 16
+experiments: [e4]
+null_directions: {cov: 30, iso: 10}
+e4:
+  kinds: [planet_testimony]
+  n_items: 2
+  chunk_items: 1
+  n_agents: 5
+  rounds: 2
+  minority: [1, 2]
+  fracs: []
+  statement_tokens: 30

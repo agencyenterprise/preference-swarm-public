@@ -1,0 +1,26 @@
+# Testimony vs insistence (2026-11-09, Thomas): the majority's database has no entry for the entity; one truth-teller's
+# copy has the right value and it says so ONCE (round 1), then only "I have nothing more to add."; 0-2 misinformed
+# members (their copy has another value) keep arguing, plainly or stubbornly; plus the truth-teller kept talking, and
+# nobody informed. Compare with planet_known (truth in every majority prompt) from runs 2-3. No steering. e4 in
+# chunks of 5 questions, each covering every condition, saved as it finishes.
+run_name: v4_testimony_llama8b_L10
+model: meta-llama/Llama-3.1-8B-Instruct
+exp50_dir: data/exp50/Llama-3.1-8B-Instruct_L10
+layer: 10
+like_vector: general_readout
+seed: 0
+temperature: 1.0
+max_new_tokens: 120
+batch_choose: 16
+batch_generate: 96
+experiments: [e4]
+null_directions: {cov: 30, iso: 10}
+e4:
+  kinds: [planet_testimony]
+  n_items: 60
+  chunk_items: 5
+  n_agents: 5
+  rounds: 3
+  minority: [1, 2]
+  fracs: []
+  statement_tokens: 90

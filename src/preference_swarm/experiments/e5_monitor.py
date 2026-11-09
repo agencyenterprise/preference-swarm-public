@@ -56,7 +56,7 @@ def minority_table(runs: List[Dict], names: List[str]) -> Dict:
     """
     xs: Dict[str, List[float]] = {nm: [] for nm in names}
     net, prev, rnd, y = [], [], [], []
-    every = [row for r in runs for t in r["votes"][1:] for i, v in enumerate(t) if i >= r["k"]
+    every = [row for r in runs for t in r["votes"][1:] for i, v in enumerate(t) if i >= r["k"] + r.get("t", 0)
              for row in (v.get("readout_incoming") or []) if np.all(np.isfinite(row))]
     g = np.asarray(every, dtype=np.float64).mean(axis=0) if every else np.zeros(len(names))
     for r in runs:
@@ -64,7 +64,7 @@ def minority_table(runs: List[Dict], names: List[str]) -> Dict:
         V = r["votes"]
         for t in range(1, len(V)):
             senders_sign = [float(np.sign(V[t - 1][j]["m"])) for j in range(len(V[t - 1]))]
-            for i in range(k, len(V[t])):
+            for i in range(k + r.get("t", 0), len(V[t])):
                 inc = V[t][i].get("readout_incoming")
                 if not inc:
                     continue

@@ -174,3 +174,44 @@ def test_e4_chunks_are_balanced_and_resume_skips_done_questions(tmp_path):
     assert sorted({r["item"] for r in dl2}) == [0, 1, 2]
     assert ctx.calls["generate"] > calls
     assert json.load(open(tmp_path / "e4_minority" / "summary.json"))["_progress"]["questions_done"] == 6
+
+
+def test_testimony_truth_teller_speaks_once_and_is_not_counted_in_the_majority(tmp_path):
+    from preference_swarm import facts as FX
+    cfg = yaml.safe_load(open(REPO_ROOT / "configs" / "v4_testimony_smoke.yaml"))
+    ctx = FakeCtx(tmp_path, cfg)
+    seen = []
+    orig = ctx.generate
+
+    def spy(items, max_new_tokens=None, seed=0, desc=""):
+        seen.append(items)
+        return orig(items, max_new_tokens, seed, desc)
+
+    ctx.generate = spy
+    c4 = dict(cfg["e4"], n_items=1)
+    s = E4.run(ctx, c4)["planet_testimony"]
+    conds = [c["cond"] for c in E4.conditions(c4, "planet_testimony")]
+    assert conds == ["t0k0", "t1k0@once", "t1k1@once", "t1k1@once+stubborn", "t1k2@once", "t1k2@once+stubborn",
+                     "t1k2@persist"]
+    case = FX.make_cases("planet_testimony", 1, int(cfg.get("seed", 0)) + 4)[0]
+    right_line = [l for l in case.minority_right.splitlines() if case.right in l][0]
+    wrong_line = [l for l in case.minority.splitlines() if case.wrong in l][0]
+    n = cfg["e4"]["n_agents"]
+    ib = conds.index("t1k2@once")                      # members 0,1 misinformed, 2 the truth-teller, 3,4 the majority
+    members = seen[0][ib * n:(ib + 1) * n]
+    assert all(wrong_line in m.messages[1]["content"] for m in members[:2])
+    assert right_line in members[2].messages[1]["content"] and wrong_line not in members[2].messages[1]["content"]
+    assert all(right_line not in m.messages[1]["content"] and wrong_line not in m.messages[1]["content"] for m in members[3:])
+    dl = [json.loads(l) for l in open(tmp_path / "e4_minority" / "deliberations.jsonl")]
+    once = [r for r in dl if r["cond"] == "t1k2@once"][0]
+    assert once["statements"][0][2] != E4.NOTHING_MORE
+    assert all(rnd[2] == E4.NOTHING_MORE for rnd in once["statements"][1:])
+    persist = [r for r in dl if r["cond"] == "t1k2@persist"][0]
+    assert all(rnd[2] != E4.NOTHING_MORE for rnd in persist["statements"])
+    assert s["t1k2@once"]["teller_wrong_rate_final"] is not None and s["t0k0"]["teller_wrong_rate_final"] is None
+    # the majority share is over members 3 and 4 only
+    R = len(once["votes"]) - 1
+    want = np.mean([float(v["m"] > 0) for v in once["votes"][R][3:]])
+    assert abs(s["t1k2@once"]["unsteered_wrong_rate_final"]["mean"] - np.mean(
+        [np.mean([float(v["m"] > 0) for v in r["votes"][R][3:]]) for r in dl if r["cond"] == "t1k2@once"])) < 1e-9
+    assert want in (0.0, 0.5, 1.0)
