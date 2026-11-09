@@ -45,7 +45,10 @@ def readout_direction(S: np.ndarray, y: np.ndarray, n_pcs: int = N_PCS_READOUT, 
     mapped back to one residual-stream direction."""
     C = S - S.mean(0)
     _, sv, vt = np.linalg.svd(C, full_matrices=False)
-    k = min(n_pcs, len(sv))
+    # components with ~zero variance (fewer requests than n_pcs, e.g. the layer-sweep smoke's 40) would dominate the
+    # back-mapping through 1/scale and leave a direction with no spread over the requests; drop them. exp50's own fits
+    # (1,500 requests, 50 components) never reach this, so they are unchanged.
+    k = min(n_pcs, int(np.sum(sv > sv[0] * 1e-6)))
     Z = C @ vt[:k].T
     Z = Z / (Z.std(0) + 1e-12)
     ys = (y - y.mean()) / (y.std() + 1e-12)
