@@ -17,6 +17,12 @@ For each block L in --layers:
      Measured: shift of the vote toward the pushed request against no push, in log-odds.
 A block steers if the readout (or tercile) push beats the random push there with intervals apart.
 
+--symmetric (added after the first sweep, 2026-11-08): one random direction of arbitrary sign is not a fair null
+(it may line up with liking or against it by chance), and a large push changes the choice whatever its sign (an
+odd-looking option is avoided). So every direction is pushed +v and -v; the PREFERENCE part (half the difference)
+is what flips with the sign, the PUSH part (half the sum) is what does not; and the null is N random directions'
+preference parts, by size.
+
     python scripts/layer_sweep.py --model meta-llama/Llama-3.1-8B-Instruct --exp50 data/exp50/Llama-3.1-8B-Instruct
 """
 from __future__ import annotations
@@ -80,6 +86,51 @@ def calibrate_layer(hf, tok, e50, layer, dirs, sd, sds, pairs, batch):
     return out
 
 
+def calibrate_layer_sym(hf, tok, e50, layer, dirs, sd, sds, pairs, batch):
+    """Every direction pushed both ways (+v and -v) at each strength. Per pair, the PREFERENCE part is
+    (shift(+v) - shift(-v)) / 2: what flips with the sign, i.e. steering. The PUSH part is (shift(+v) + shift(-v)) / 2:
+    what any push of that size does regardless of sign (an odd-looking option avoided, or a salient one chosen)."""
+    cells = [("none", 0.0, 0)] + [(k, s, sg) for k in dirs for s in sds for sg in (1, -1)]
+    items, keys = [], []
+    for pi, (h, lo) in enumerate(pairs):
+        for order in (0, 1):
+            a, b = (e50.texts[lo], e50.texts[h]) if order == 0 else (e50.texts[h], e50.texts[lo])
+            L = "A" if order == 0 else "B"
+            msgs = [{"role": "user", "content": CALIBRATE_Q.format(block=M.option_block(a, b))}]
+            for kind, s, sg in cells:
+                keys.append((pi, order, kind, s, sg))
+                items.append(EN.Item(msgs, a, b, like=L if kind != "none" else None, vector=dirs.get(kind),
+                                     alpha=sg * float(s) * sd.get(kind, 0.0) if kind != "none" else 0.0))
+    res = EN.choose(hf, tok, layer, items, None, batch_size=batch, desc=f"block {layer} +/-")
+    m = {k: (x["margin"] if k[1] == 0 else -x["margin"]) for k, x in zip(keys, res)}
+
+    def shift(p, kind, s, sg):
+        return np.mean([m[(p, o, kind, s, sg)] - m[(p, o, "none", 0.0, 0)] for o in (0, 1)])
+
+    out = {}
+    for kind in dirs:
+        for s in sds:
+            plus = [shift(p, kind, s, 1) for p in range(len(pairs))]
+            minus = [shift(p, kind, s, -1) for p in range(len(pairs))]
+            pref = [(x - y) / 2 for x, y in zip(plus, minus)]
+            push = [(x + y) / 2 for x, y in zip(plus, minus)]
+            out[f"{kind}@{s}sd"] = {"plus": ST.mean_ci(plus), "minus": ST.mean_ci(minus),
+                                   "pref": {**ST.mean_ci(pref), "p": ST.sign_flip_p(pref)}, "push": ST.mean_ci(push)}
+    return out
+
+
+def null_summary(cal, sds, n_random):
+    """The preference part of each real direction against the 8 random directions' preference parts (by size)."""
+    out = {}
+    for s in sds:
+        rnd = np.array([abs(cal[f"random{i}@{s}sd"]["pref"]["mean"]) for i in range(n_random)])
+        for k in ("readout", "tercile"):
+            v = cal[f"{k}@{s}sd"]["pref"]["mean"]
+            out[f"{k}@{s}sd"] = {"pref": v, "random_abs_mean": float(rnd.mean()), "random_abs_max": float(rnd.max()),
+                                 "p_vs_random": float((1 + np.sum(rnd >= abs(v))) / (1 + len(rnd)))}
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
@@ -91,6 +142,9 @@ def main(argv=None) -> int:
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--smoke-prompts", default="data/smoke_prompts.jsonl")
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--symmetric", action="store_true",
+                    help="push every direction +v and -v; split into preference and push parts; N random directions")
+    ap.add_argument("--n-random", type=int, default=8, help="random directions per block in --symmetric mode")
     a = ap.parse_args(argv)
     t0 = time.time()
     hf, tok = M.load(a.model)
@@ -118,20 +172,42 @@ def main(argv=None) -> int:
         ro = RB.readout_direction(S, y)
         dirs = {"readout": ro["direction"], "tercile": RB.tercile_direction(S, y),
                 "random": RB.random_sets(S.shape[1], 1, 1, RANDOM_SEED, cov_from=S)[0][0]}
+        if a.symmetric:
+            dirs.pop("random")
+            for i, u in enumerate(RB.random_sets(S.shape[1], 1, a.n_random, RANDOM_SEED, cov_from=S)):
+                dirs[f"random{i}"] = u[0]
         sd = {k: float((S @ v).std()) for k, v in dirs.items()}
-        cal = calibrate_layer(hf, tok, e50, L, dirs, sd, sds, pairs, a.batch)
-        row = {"layer": L, "readout_cv_r2": ro["cv_r2"], "proj_sd": sd,
+        # how much each direction lines up with liking, as seen in the states (a random one can by chance)
+        corr = {k: float(np.corrcoef(S @ v, y)[0, 1]) for k, v in dirs.items()}
+        if a.symmetric:
+            cal = calibrate_layer_sym(hf, tok, e50, L, dirs, sd, sds, pairs, a.batch)
+            nul = null_summary(cal, sds, a.n_random)
+        else:
+            cal = calibrate_layer(hf, tok, e50, L, dirs, sd, sds, pairs, a.batch)
+            nul = None
+        row = {"layer": L, "readout_cv_r2": ro["cv_r2"], "proj_sd": sd, "corr_with_score": corr,
                "mean_norm": float(np.linalg.norm(S, axis=1).mean()), "cos_readout_tercile": float(dirs["readout"] @ dirs["tercile"]),
-               "calibration": cal}
+               "calibration": cal, "null": nul}
         rows.append(row)
-        write_json({"model": a.model, "rows": rows}, out / "layer_sweep.json")
-        line = "  ".join(f"{s:g}sd ro {cal[f'readout@{s}sd']['mean']:+.2f} te {cal[f'tercile@{s}sd']['mean']:+.2f} "
-                         f"rnd {cal[f'random@{s}sd']['mean']:+.2f}" for s in sds)
+        write_json({"model": a.model, "symmetric": a.symmetric, "rows": rows}, out / "layer_sweep.json")
+        if a.symmetric:
+            line = "  ".join(
+                f"{s:g}sd pref ro {nul[f'readout@{s}sd']['pref']:+.2f} te {nul[f'tercile@{s}sd']['pref']:+.2f} "
+                f"| random |pref| mean {nul[f'readout@{s}sd']['random_abs_mean']:.2f} max {nul[f'readout@{s}sd']['random_abs_max']:.2f} "
+                f"| push ro {cal[f'readout@{s}sd']['push']['mean']:+.2f}" for s in sds)
+        else:
+            line = "  ".join(f"{s:g}sd ro {cal[f'readout@{s}sd']['mean']:+.2f} te {cal[f'tercile@{s}sd']['mean']:+.2f} "
+                             f"rnd {cal[f'random@{s}sd']['mean']:+.2f}" for s in sds)
         print(f"[sweep] block {L:2d}  readout R2 {ro['cv_r2']:.2f}  {line}", flush=True)
-    best = max(rows, key=lambda r: max(r["calibration"][f"readout@{s}sd"]["mean"] - r["calibration"][f"random@{s}sd"]["mean"]
-                                        for s in sds))
-    print(f"[sweep] largest readout-minus-random gap at block {best['layer']}; {out} ({(time.time() - t0) / 60:.1f} min)",
-          flush=True)
+    if a.symmetric:
+        best = max(rows, key=lambda r: max(r["null"][f"readout@{s}sd"]["pref"] - r["null"][f"readout@{s}sd"]["random_abs_max"]
+                                            for s in sds))
+        print(f"[sweep] largest readout preference part over the largest random one at block {best['layer']}", flush=True)
+    else:
+        best = max(rows, key=lambda r: max(r["calibration"][f"readout@{s}sd"]["mean"] - r["calibration"][f"random@{s}sd"]["mean"]
+                                            for s in sds))
+        print(f"[sweep] largest readout-minus-random gap at block {best['layer']}", flush=True)
+    print(f"[sweep] {out} ({(time.time() - t0) / 60:.1f} min)", flush=True)
     (REPO_ROOT / "outputs" / "latest").mkdir(parents=True, exist_ok=True)
     (REPO_ROOT / "outputs" / "latest" / f"layer_sweep_{a.model.split('/')[-1]}.txt").write_text(str(out) + "\n")
     return 0
