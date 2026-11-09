@@ -1,0 +1,65 @@
+# Smoke for v3_llama8b_L10: the real model at block 10 on directions rebuilt from 80 requests, every experiment at toy size.
+run_name: v3_llama8b_L10_smoke
+model: meta-llama/Llama-3.1-8B-Instruct
+exp50_dir: outputs/smoke_L10_exp50
+layer: 10
+like_vector: general_readout
+seed: 0
+temperature: 1.0
+max_new_tokens: 20
+batch_choose: 16
+batch_generate: 96
+experiments:
+- e2
+- e3
+- e4
+- e5
+null_directions:
+  cov: 30
+  iso: 10
+calibrate:
+  n: 4
+  fracs:
+  - 0.66
+e2:
+  n_pairs: 2
+  rounds: 1
+  fracs:
+  - 0.66
+  controls:
+  - like
+  - random
+  - shuffled
+  n_chains: 1
+  chain_len: 2
+  chain_frac: 0.66
+  chain_tokens: 20
+e3:
+  kinds:
+  - passage
+  - contested
+  - planet_known
+  - planet_blank
+  - opinion
+  n_items: 2
+  styles:
+  - plain
+  prefill: true
+  frac: 0.66
+  controls:
+  - like
+  - random
+  argument_tokens: 20
+e4:
+  kinds:
+  - opinion
+  - planet_blank
+  n_items: 2
+  n_agents: 3
+  rounds: 1
+  minority:
+  - 1
+  fracs:
+  - 0.66
+  statement_tokens: 20
+e5: {}

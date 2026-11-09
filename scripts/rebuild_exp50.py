@@ -81,7 +81,7 @@ def main(argv=None) -> int:
     np.savez(out / "states.npz", S=S.astype(np.float32), y=y, names=np.array(names))
     for f in SAVED:
         shutil.copyfile(src / f, out / f)
-    if a.model.split("/")[-1] != name:       # the smoke: say which model the states really came from
+    if a.model.split("/")[-1] != name or a.layer != LAYER:   # another model (smoke) or block: record what was used
         g = json.load(open(out / "general_pref.json"))
         g.update({"model": a.model, "layer": a.layer})
         (out / "general_pref.json").write_text(json.dumps(g, indent=2))
@@ -97,7 +97,7 @@ def main(argv=None) -> int:
           f"{b['readout_alpha']} (exp50 {rec.get('readout_alpha')}), cos tercile/readout "
           f"{b['cos_tercile_readout']:.3f} (exp50 {rec.get('cos_tercile_readout')})")
     print(f"[rebuild]   wrote {out}: {', '.join(sorted(p.name for p in out.iterdir()))}")
-    full = a.n >= N_PROMPTS and a.model.split("/")[-1] == name
+    full = a.n >= N_PROMPTS and a.model.split("/")[-1] == name and a.layer == LAYER   # exp50's R2 is for block 16
     if full and rec.get("readout_cv_r2") is not None and abs(b["readout_cv_r2"] - rec["readout_cv_r2"]) > CV_R2_TOLERANCE:
         print(f"[rebuild]   FAIL: cv R2 differs from exp50's by more than {CV_R2_TOLERANCE}")
         return 1
